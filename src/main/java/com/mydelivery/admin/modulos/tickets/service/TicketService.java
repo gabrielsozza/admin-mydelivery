@@ -26,9 +26,11 @@ import com.mydelivery.admin.modulos.tickets.entity.Ticket;
 import com.mydelivery.admin.modulos.tickets.entity.TicketMensagem;
 import com.mydelivery.admin.shared.exception.NotFoundException;
 import com.mydelivery.admin.shared.main.entity.RestauranteMain;
+import com.mydelivery.admin.shared.main.entity.SuporteAnexoMain;
 import com.mydelivery.admin.shared.main.entity.SuporteMensagemMain;
 import com.mydelivery.admin.shared.main.entity.SuporteTicketMain;
 import com.mydelivery.admin.shared.main.repository.RestauranteMainRepository;
+import com.mydelivery.admin.shared.main.repository.SuporteAnexoMainRepository;
 import com.mydelivery.admin.shared.main.repository.SuporteMensagemMainRepository;
 import com.mydelivery.admin.shared.main.repository.SuporteTicketMainRepository;
 
@@ -57,6 +59,7 @@ public class TicketService {
 
     private final SuporteTicketMainRepository ticketRepo;
     private final SuporteMensagemMainRepository mensagemRepo;
+    private final SuporteAnexoMainRepository anexoRepo;
     private final AdminUserRepository adminRepo;
     private final RestauranteMainRepository restauranteRepo;
     private final MainDbWriter mainWriter;
@@ -101,7 +104,18 @@ public class TicketService {
                 .orElseThrow(() -> new NotFoundException("Ticket não encontrado"));
 
         List<SuporteMensagemMain> msgs = mensagemRepo.findByTicketIdOrderByCriadoEmAsc(id);
-        List<MensagemDTO> mdtos = msgs.stream().map(this::toMensagemDTO).toList();
+        // Carrega TODOS os anexos em 1 query (evita N+1) e agrupa por mensagemId
+        List<Long> msgIds = msgs.stream().map(SuporteMensagemMain::getId).toList();
+        Map<Long, List<String>> anexosPorMsg = new HashMap<>();
+        if (!msgIds.isEmpty()) {
+            for (SuporteAnexoMain a : anexoRepo.findByMensagemIdIn(msgIds)) {
+                anexosPorMsg.computeIfAbsent(a.getMensagemId(), k -> new ArrayList<>())
+                        .add(a.getUrl());
+            }
+        }
+        List<MensagemDTO> mdtos = msgs.stream()
+                .map(m -> toMensagemDTO(m, anexosPorMsg.getOrDefault(m.getId(), new ArrayList<>())))
+                .toList();
 
         String restNome = nomeRestaurante(t.getRestauranteId());
         String atribuidoNome = t.getAtendenteId() == null ? null : nomeAdmin(t.getAtendenteId());
@@ -309,13 +323,17 @@ public class TicketService {
     }
 
     private MensagemDTO toMensagemDTO(SuporteMensagemMain m) {
+        return toMensagemDTO(m, new ArrayList<>());
+    }
+
+    private MensagemDTO toMensagemDTO(SuporteMensagemMain m, List<String> anexos) {
         return MensagemDTO.builder()
                 .id(m.getId())
                 .autorTipo(mainAutorParaAdminStr(m.getAutor()))
                 .autorId(null)
                 .autorNome(m.getAutorNome())
                 .mensagem(m.getTexto())
-                .anexos(new ArrayList<>()) // V1: anexos não exibidos
+                .anexos(anexos == null ? new ArrayList<>() : anexos)
                 .criadoEm(m.getCriadoEm())
                 .lidaPeloAdmin(true)
                 .lidaPeloRestaurante(true)
