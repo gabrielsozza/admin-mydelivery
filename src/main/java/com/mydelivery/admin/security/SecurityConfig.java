@@ -71,7 +71,9 @@ public class SecurityConfig {
                 .filter(s -> !s.isBlank())
                 .toList();
 
-        config.setAllowedOrigins(origins);
+        // setAllowedOriginPatterns aceita wildcard mesmo com allowCredentials=true.
+        // Origens fixas (sem wildcard) continuam funcionando 1:1.
+        config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
