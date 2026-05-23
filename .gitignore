@@ -1,0 +1,35 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IDEs ###
+.idea
+*.iws
+*.iml
+*.ipr
+.vscode/
+.classpath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### Credenciais locais — NUNCA commitar
+.env
+.env.local
+.env.*
+!.env.example
+application-local.properties
+application-*-local.properties
+src/main/resources/application-local.properties
+src/main/resources/application-*-local.properties
+
+### macOS / OS
+.DS_Store
+*.log
+logs/
+
+### Claude Code working files
+.claude/
