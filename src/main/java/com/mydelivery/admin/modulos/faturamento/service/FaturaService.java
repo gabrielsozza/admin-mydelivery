@@ -158,6 +158,7 @@ public class FaturaService {
         String statusDTO = switch (p.getStatus()) {
             case PENDENTE  -> "PENDENTE";
             case PAGO      -> "PAGA";
+            case REJEITADO -> "REJEITADA";
             case CANCELADO -> "CANCELADA";
         };
         Fatura.MetodoPagamento metodo = parseMetodo(p.getMetodoPagamento());
