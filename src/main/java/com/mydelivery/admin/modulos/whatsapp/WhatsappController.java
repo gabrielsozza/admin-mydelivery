@@ -1,12 +1,14 @@
 package com.mydelivery.admin.modulos.whatsapp;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -62,5 +64,24 @@ public class WhatsappController {
     @GetMapping("/resumo")
     public ResponseEntity<WhatsappResumoDTO> resumo() {
         return ResponseEntity.ok(service.resumo());
+    }
+
+    /**
+     * Reinicia a sessão WhatsApp do restaurante (sem QR novo). Usado pra
+     * "destravar" bot que dormiu. Operação leve — só refresca o Baileys.
+     */
+    @PostMapping("/{id}/restart")
+    public ResponseEntity<Map<String, Object>> restart(@PathVariable Long id) {
+        return ResponseEntity.ok(service.restart(id));
+    }
+
+    /**
+     * Health-check real-time direto na Evolution (não usa cache do banco).
+     * Devolve stateReal + coerente=false se banco e Evolution discordam —
+     * sinal de "bot dormindo" ou status zumbi.
+     */
+    @GetMapping("/{id}/health-check")
+    public ResponseEntity<Map<String, Object>> healthCheck(@PathVariable Long id) {
+        return ResponseEntity.ok(service.healthCheck(id));
     }
 }

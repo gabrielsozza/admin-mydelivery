@@ -34,6 +34,7 @@ public class WhatsappAdminService {
 
     private final WhatsappInstanceMainRepository repo;
     private final RestauranteMainRepository restauranteRepo;
+    private final EvolutionAdminClient evolution;
 
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public WhatsappResumoDTO resumo() {
@@ -105,5 +106,62 @@ public class WhatsappAdminService {
         if (s == null || s.isBlank()) return null;
         try { return Enum.valueOf(type, s.trim().toUpperCase()); }
         catch (IllegalArgumentException e) { return null; }
+    }
+
+    // ─── AÇÕES DE MANUTENÇÃO ──────────────────────────────────────────────
+
+    /**
+     * Reinicia a sessão WhatsApp do restaurante chamando Evolution diretamente.
+     * SEM logout — mantém pareamento. Usado pelo admin pra "destravar" bots que
+     * parecem ter dormido (shadow-ban silencioso do WhatsApp).
+     */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public Map<String, Object> restart(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        if (inst.getInstanceName() == null || inst.getInstanceName().isBlank()) {
+            throw new RuntimeException("Instância sem nome configurado");
+        }
+        evolution.restart(inst.getInstanceName());
+        return Map.of("ok", true, "instanceName", inst.getInstanceName());
+    }
+
+    /**
+     * Verifica o estado REAL na Evolution agora (não cache do DB). Útil pra detectar
+     * "bot dormindo" — Evolution mostra open mas banco mostra outra coisa, ou
+     * Evolution não responde de jeito nenhum.
+     *
+     * Retorna:
+     *   { stateReal: "open"|"close"|"connecting"|"timeout", stateLocal: "...",
+     *     coerente: bool, instanceName: "..." }
+     */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public Map<String, Object> healthCheck(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        Map<String, Object> evo = evolution.connectionState(inst.getInstanceName());
+
+        String stateReal = "timeout";
+        if (evo != null) {
+            Object instData = evo.get("instance");
+            if (instData instanceof Map<?, ?> m) {
+                Object s = ((Map<String, Object>) m).get("state");
+                if (s != null) stateReal = s.toString();
+            } else if (evo.get("state") != null) {
+                stateReal = evo.get("state").toString();
+            } else if (evo.get("erro") != null) {
+                stateReal = "timeout";
+            }
+        }
+        String stateLocal = inst.getStatus() == null ? "?" : inst.getStatus().name();
+        boolean coerente = ("open".equalsIgnoreCase(stateReal) && "CONECTADA".equals(stateLocal))
+                || ("close".equalsIgnoreCase(stateReal) && "DESCONECTADA".equals(stateLocal));
+        return Map.of(
+                "instanceName", inst.getInstanceName(),
+                "stateReal", stateReal,
+                "stateLocal", stateLocal,
+                "coerente", coerente,
+                "raw", evo
+        );
     }
 }
