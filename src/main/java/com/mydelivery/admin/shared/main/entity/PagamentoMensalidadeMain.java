@@ -46,6 +46,21 @@ public class PagamentoMensalidadeMain {
     @Column(name = "referencia_gateway", length = 200)
     private String referenciaGateway;
 
+    @Column(name = "plano", length = 20)
+    private String plano;
+
+    @Column(name = "categoria_erro", length = 20)
+    private String categoriaErro;
+
+    @Column(name = "motivo_erro", columnDefinition = "TEXT")
+    private String motivoErro;
+
+    @Column(name = "mp_payment_id")
+    private Long mpPaymentId;
+
+    @Column(name = "mp_status_detail", length = 80)
+    private String mpStatusDetail;
+
     @Column(name = "pago_em")
     private LocalDateTime pagoEm;
 
@@ -53,6 +68,6 @@ public class PagamentoMensalidadeMain {
     private LocalDateTime criadoEm;
 
     public enum Status {
-        PENDENTE, PAGO, CANCELADO
+        PENDENTE, PAGO, REJEITADO, CANCELADO
     }
 }
