@@ -1,8 +1,11 @@
 package com.mydelivery.admin.modulos.restaurantes;
 
+import java.util.Map;
+
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,5 +47,22 @@ public class RestaurantesController {
     @GetMapping("/{id}")
     public ResponseEntity<RestauranteDetalheDTO> detalhe(@PathVariable Long id) {
         return ResponseEntity.ok(service.detalhe(id));
+    }
+
+    /**
+     * Apaga DEFINITIVAMENTE o restaurante e tudo associado.
+     * Operação irreversível — usar pra limpar cadastros lixo.
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> apagar(@PathVariable Long id) {
+        Map<String, Integer> detalhe = service.apagarDefinitivamente(id);
+        int total = detalhe.values().stream().mapToInt(Integer::intValue).sum();
+        return ResponseEntity.ok(Map.of(
+            "ok", true,
+            "restauranteId", id,
+            "linhasRemovidas", total,
+            "detalhe", detalhe,
+            "mensagem", "Restaurante apagado definitivamente (" + total + " registros removidos)."
+        ));
     }
 }

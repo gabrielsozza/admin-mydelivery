@@ -105,9 +105,26 @@ public class AssinaturaService {
     }
 
     public AssinaturaDTO suspender(Long id, String motivo) {
-        int n = writer.suspenderAssinatura(id);
-        if (n == 0) throw new IllegalStateException("Assinatura não está ATIVA ou já mudou de estado");
-        log.info("[Assinatura] suspensa id={} motivo={}", id, motivo);
+        // Resolve restaurante a partir do id da assinatura
+        AssinaturaMain a = repo.findById(id)
+                .orElseThrow(() -> new NotFoundException("Assinatura não encontrada"));
+
+        if ("CANCELADA".equals(a.getStatus() != null ? a.getStatus().name() : null)) {
+            throw new IllegalStateException("Assinatura já está CANCELADA — não pode suspender");
+        }
+
+        // Suspende o restaurante (bloqueia + marca assinatura INADIMPLENTE)
+        // Aceita TRIAL/ATIVA/PENDENTE — só não opera em CANCELADA
+        int n = writer.suspenderRestauranteManual(a.getRestauranteId(),
+                motivo != null && !motivo.isBlank() ? motivo : "Suspenso pelo admin");
+
+        if (n == 0) {
+            // Já estava bloqueado E já inadimplente — não precisa fazer nada
+            log.info("[Assinatura] suspender id={} idempotente (já estava suspenso)", id);
+        } else {
+            log.info("[Assinatura] suspensa id={} restauranteId={} updates={} motivo={}",
+                    id, a.getRestauranteId(), n, motivo);
+        }
         return detalhe(id);
     }
 

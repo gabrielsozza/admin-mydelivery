@@ -70,6 +70,8 @@ public class MainDbWriter {
 
     /**
      * Suspende uma assinatura (status → INADIMPLENTE — usado pra pausa manual).
+     * Aceita TRIAL, ATIVA e PENDENTE — só não mexe se já estiver CANCELADA
+     * ou já INADIMPLENTE (idempotente).
      * @return linhas afetadas
      */
     @Transactional(transactionManager = "mainTransactionManager")
@@ -79,11 +81,47 @@ public class MainDbWriter {
             UPDATE assinaturas
                SET status = 'INADIMPLENTE'
              WHERE id = ?
-               AND status = 'ATIVA'
+               AND status NOT IN ('CANCELADA', 'INADIMPLENTE')
             """;
         int linhas = jdbc.update(sql, assinaturaId);
         log.warn("[MainDbWriter] suspenderAssinatura id={} linhas={}", assinaturaId, linhas);
         return linhas;
+    }
+
+    /**
+     * Bloqueia restaurante manualmente (admin) + marca assinatura como INADIMPLENTE.
+     * Aceita restaurante em qualquer status (ATIVO/TRIAL/PENDENTE) — só não sobrescreve
+     * se já está BLOQUEADO.
+     * @return número total de updates feitos (restaurante + assinatura)
+     */
+    @Transactional(transactionManager = "mainTransactionManager")
+    public int suspenderRestauranteManual(Long restauranteId, String motivo) {
+        if (restauranteId == null) throw new IllegalArgumentException("restauranteId null");
+        if (motivo == null || motivo.isBlank()) motivo = "Suspenso manualmente pelo admin";
+        if (motivo.length() > 240) motivo = motivo.substring(0, 240);
+
+        int total = 0;
+        // 1. Bloqueia restaurante
+        total += jdbc.update("""
+            UPDATE restaurantes
+               SET status = 'BLOQUEADO',
+                   bloqueado_em = ?,
+                   motivo_bloqueio = ?
+             WHERE id = ?
+               AND status <> 'BLOQUEADO'
+            """, LocalDateTime.now(), motivo, restauranteId);
+
+        // 2. Marca assinatura ativa como INADIMPLENTE (se existir)
+        total += jdbc.update("""
+            UPDATE assinaturas
+               SET status = 'INADIMPLENTE'
+             WHERE restaurante_id = ?
+               AND status NOT IN ('CANCELADA', 'INADIMPLENTE')
+            """, restauranteId);
+
+        log.warn("[MainDbWriter] suspenderRestauranteManual id={} updates={} motivo={}",
+                restauranteId, total, motivo);
+        return total;
     }
 
     /** Reativa uma assinatura suspensa (INADIMPLENTE → ATIVA). */
@@ -410,5 +448,217 @@ public class MainDbWriter {
                 LocalDateTime.now(), id);
         log.info("[MainDbWriter] desativarPlanoCatalogo id={} linhas={}", id, linhas);
         return linhas;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HARD DELETE — apaga restaurante e TUDO relacionado
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Apaga completamente um restaurante e todos os dados associados.
+     *
+     * Uso: limpar cadastros "lixo" de curiosos que criam conta e nunca usam.
+     * ATENÇÃO: operação IRREVERSÍVEL. Não recupera. Sem soft-delete.
+     *
+     * Ordem dos DELETEs respeita a topologia de foreign keys: filhos primeiro.
+     * Tudo dentro de uma transação — se qualquer step falhar, rollback total.
+     *
+     * Tabelas afetadas (em ordem):
+     *  1. pedido_item_complementos → pedido_itens → pagamentos → pedidos
+     *  2. cupons_usos → cupons
+     *  3. compra_itens → compras
+     *  4. complementos_item → complementos_grupo → fichas_tecnicas → produtos → categorias
+     *  5. movimentacoes_estoque → insumos
+     *  6. chamadas_garcom → mesas
+     *  7. pontos_transacoes → programas_fidelidade → carrinhos_abandonados → clientes
+     *  8. entregadores
+     *  9. pagamentos_mensalidade → assinaturas
+     * 10. suporte_anexos → suporte_mensagens → suporte_tickets
+     * 11. whatsapp_instances
+     * 12. configuracoes_restaurante + restaurante_bairros/modos/pagamentos/slots
+     * 13. restaurantes
+     * 14. password_reset_tokens (do usuário dono) + usuario órfão
+     *
+     * @return Map com contadores de linhas removidas por área pra logging/auditoria
+     */
+    @Transactional(transactionManager = "mainTransactionManager")
+    public java.util.Map<String, Integer> apagarRestauranteCompletamente(Long restauranteId) {
+        if (restauranteId == null) throw new IllegalArgumentException("restauranteId null");
+
+        // Captura o usuario_id ANTES de apagar o restaurante (ficaria órfão senão)
+        Long usuarioId;
+        try {
+            usuarioId = jdbc.queryForObject(
+                "SELECT usuario_id FROM restaurantes WHERE id = ?",
+                Long.class, restauranteId);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            throw new IllegalStateException("Restaurante " + restauranteId + " não encontrado");
+        }
+
+        java.util.Map<String, Integer> stats = new java.util.LinkedHashMap<>();
+
+        // ─── 1. PEDIDOS (cascata profunda) ──────────────────────────────
+        stats.put("pedido_item_complementos", jdbc.update("""
+            DELETE pic FROM pedido_item_complementos pic
+              JOIN pedido_itens pi ON pi.id = pic.pedido_item_id
+              JOIN pedidos p ON p.id = pi.pedido_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("pedido_itens", jdbc.update("""
+            DELETE pi FROM pedido_itens pi
+              JOIN pedidos p ON p.id = pi.pedido_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("pagamentos", jdbc.update("""
+            DELETE pg FROM pagamentos pg
+              JOIN pedidos p ON p.id = pg.pedido_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("pedidos", jdbc.update(
+            "DELETE FROM pedidos WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 2. CUPONS ──────────────────────────────────────────────────
+        stats.put("cupons_usos", jdbc.update("""
+            DELETE cu FROM cupons_usos cu
+              JOIN cupons c ON c.id = cu.cupom_id
+             WHERE c.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("cupons", jdbc.update(
+            "DELETE FROM cupons WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 3. COMPRAS (estoque) ───────────────────────────────────────
+        stats.put("compra_itens", jdbc.update("""
+            DELETE ci FROM compra_itens ci
+              JOIN compras c ON c.id = ci.compra_id
+             WHERE c.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("compras", jdbc.update(
+            "DELETE FROM compras WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 4. PRODUTOS (complementos, ficha técnica, categorias) ──────
+        stats.put("complementos_item", jdbc.update("""
+            DELETE ci FROM complementos_item ci
+              JOIN complementos_grupo cg ON cg.id = ci.grupo_id
+              JOIN produtos p ON p.id = cg.produto_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("complementos_grupo", jdbc.update("""
+            DELETE cg FROM complementos_grupo cg
+              JOIN produtos p ON p.id = cg.produto_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("fichas_tecnicas", jdbc.update("""
+            DELETE ft FROM fichas_tecnicas ft
+              JOIN produtos p ON p.id = ft.produto_id
+             WHERE p.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("produtos", jdbc.update(
+            "DELETE FROM produtos WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("categorias", jdbc.update(
+            "DELETE FROM categorias WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 5. ESTOQUE (insumos + movimentações) ───────────────────────
+        stats.put("movimentacoes_estoque", jdbc.update("""
+            DELETE me FROM movimentacoes_estoque me
+              JOIN insumos i ON i.id = me.insumo_id
+             WHERE i.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("insumos", jdbc.update(
+            "DELETE FROM insumos WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 6. MESAS / CHAMADAS GARÇOM (QR codes) ──────────────────────
+        stats.put("chamadas_garcom", jdbc.update(
+            "DELETE FROM chamadas_garcom WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("mesas", jdbc.update(
+            "DELETE FROM mesas WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 7. CLIENTES / FIDELIDADE / CARRINHO ────────────────────────
+        stats.put("pontos_transacoes", jdbc.update(
+            "DELETE FROM pontos_transacoes WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("programas_fidelidade", jdbc.update(
+            "DELETE FROM programas_fidelidade WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("carrinhos_abandonados", jdbc.update(
+            "DELETE FROM carrinhos_abandonados WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("clientes", jdbc.update(
+            "DELETE FROM clientes WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 8. ENTREGADORES ────────────────────────────────────────────
+        stats.put("entregadores", jdbc.update(
+            "DELETE FROM entregadores WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 9. FATURAMENTO (SaaS interno) ──────────────────────────────
+        stats.put("pagamentos_mensalidade", jdbc.update(
+            "DELETE FROM pagamentos_mensalidade WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("assinaturas", jdbc.update(
+            "DELETE FROM assinaturas WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 10. SUPORTE ────────────────────────────────────────────────
+        stats.put("suporte_anexos", jdbc.update("""
+            DELETE sa FROM suporte_anexos sa
+              JOIN suporte_mensagens sm ON sm.id = sa.mensagem_id
+              JOIN suporte_tickets st ON st.id = sm.ticket_id
+             WHERE st.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("suporte_mensagens", jdbc.update("""
+            DELETE sm FROM suporte_mensagens sm
+              JOIN suporte_tickets st ON st.id = sm.ticket_id
+             WHERE st.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("suporte_tickets", jdbc.update(
+            "DELETE FROM suporte_tickets WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 11. WHATSAPP ───────────────────────────────────────────────
+        stats.put("whatsapp_instances", jdbc.update(
+            "DELETE FROM whatsapp_instances WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 12. CONFIG + ELEMENT COLLECTIONS ───────────────────────────
+        stats.put("configuracoes_restaurante", jdbc.update(
+            "DELETE FROM configuracoes_restaurante WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("restaurante_bairros", jdbc.update(
+            "DELETE FROM restaurante_bairros WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("restaurante_modos", jdbc.update(
+            "DELETE FROM restaurante_modos WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("restaurante_pagamentos", jdbc.update(
+            "DELETE FROM restaurante_pagamentos WHERE restaurante_id = ?", restauranteId));
+
+        stats.put("restaurante_slots", jdbc.update(
+            "DELETE FROM restaurante_slots WHERE restaurante_id = ?", restauranteId));
+
+        // ─── 13. O RESTAURANTE EM SI ────────────────────────────────────
+        stats.put("restaurantes", jdbc.update(
+            "DELETE FROM restaurantes WHERE id = ?", restauranteId));
+
+        // ─── 14. USUÁRIO DONO ───────────────────────────────────────────
+        if (usuarioId != null) {
+            stats.put("password_reset_tokens", jdbc.update(
+                "DELETE FROM password_reset_tokens WHERE usuario_id = ?", usuarioId));
+            stats.put("usuarios", jdbc.update(
+                "DELETE FROM usuarios WHERE id = ?", usuarioId));
+        }
+
+        int total = stats.values().stream().mapToInt(Integer::intValue).sum();
+        log.warn("[MainDbWriter] APAGAR restauranteId={} usuarioId={} totalLinhas={} detalhe={}",
+                restauranteId, usuarioId, total, stats);
+        return stats;
     }
 }
