@@ -12,7 +12,9 @@ import com.mydelivery.admin.modulos.restaurantes.dto.RestauranteDetalheDTO;
 import com.mydelivery.admin.modulos.restaurantes.dto.RestauranteListDTO;
 import com.mydelivery.admin.shared.exception.NotFoundException;
 import com.mydelivery.admin.shared.main.entity.RestauranteMain;
+import com.mydelivery.admin.shared.main.entity.UsuarioMain;
 import com.mydelivery.admin.shared.main.repository.RestauranteMainRepository;
+import com.mydelivery.admin.shared.main.repository.UsuarioMainRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RestaurantesService {
 
     private final RestauranteMainRepository restauranteRepo;
+    private final UsuarioMainRepository usuarioRepo;
     private final MainDbWriter writer;
 
     /**
@@ -52,7 +55,18 @@ public class RestaurantesService {
     public RestauranteDetalheDTO detalhe(Long id) {
         RestauranteMain r = restauranteRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("Restaurante não encontrado"));
-        return RestauranteDetalheDTO.from(r);
+
+        // Puxa dados do dono (Usuario) — falha silenciosa se não achar
+        String donoNome = null, donoEmail = null, donoTelefone = null;
+        if (r.getUsuarioId() != null) {
+            UsuarioMain u = usuarioRepo.findById(r.getUsuarioId()).orElse(null);
+            if (u != null) {
+                donoNome = u.getNome();
+                donoEmail = u.getEmail();
+                donoTelefone = u.getTelefone();
+            }
+        }
+        return RestauranteDetalheDTO.from(r, donoNome, donoEmail, donoTelefone);
     }
 
     /**

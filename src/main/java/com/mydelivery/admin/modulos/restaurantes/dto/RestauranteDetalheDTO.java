@@ -35,7 +35,17 @@ public class RestauranteDetalheDTO {
     private String motivoBloqueio;
     private LocalDateTime criadoEm;
 
+    // ── Dados do DONO (vindos da tabela usuarios via JOIN) ──
+    private String donoNome;
+    private String donoEmail;
+    private String donoTelefone;
+
     public static RestauranteDetalheDTO from(RestauranteMain r) {
+        return from(r, null, null, null);
+    }
+
+    public static RestauranteDetalheDTO from(RestauranteMain r,
+                                             String donoNome, String donoEmail, String donoTelefone) {
         return RestauranteDetalheDTO.builder()
                 .id(r.getId())
                 .nome(r.getNome())
@@ -55,6 +65,9 @@ public class RestauranteDetalheDTO {
                 .bloqueadoEm(r.getBloqueadoEm())
                 .motivoBloqueio(r.getMotivoBloqueio())
                 .criadoEm(r.getCriadoEm())
+                .donoNome(donoNome)
+                .donoEmail(donoEmail)
+                .donoTelefone(donoTelefone)
                 .build();
     }
 }

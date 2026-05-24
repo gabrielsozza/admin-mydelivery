@@ -33,6 +33,10 @@ public class RestauranteMain {
     @Id
     private Long id;
 
+    /** FK pro Usuario dono do restaurante (1:1). Usado pra puxar email/telefone do dono. */
+    @Column(name = "usuario_id")
+    private Long usuarioId;
+
     private String nome;
     private String slug;
     private String cnpj;
