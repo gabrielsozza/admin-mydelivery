@@ -191,6 +191,59 @@ public class BillingController {
         }
     }
 
+    /**
+     * Replica o cardápio da origem pra UMA OU MAIS lojas destino.
+     * Faz 1 chamada HTTP por destino (cada destino é uma transação isolada no main —
+     * se 1 falhar, os outros não são afetados).
+     *
+     * Body: { origemId, destinoIds: [..], modo? }
+     * Retorna: { resultados: [{ destinoId, ok, ... }] }
+     */
+    @PostMapping("/replicar-cardapio")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> replicarCardapio(@RequestBody Map<String, Object> body) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado"));
+        }
+        Object oid = body.get("origemId");
+        Object destinos = body.get("destinoIds");
+        String modo = (String) body.getOrDefault("modo", "ACRESCENTAR");
+        if (oid == null || !(destinos instanceof List<?>) || ((List<?>) destinos).isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("erro", "origemId e destinoIds[] são obrigatórios"));
+        }
+        Long origemId = Long.valueOf(oid.toString());
+
+        List<Map<String, Object>> resultados = new java.util.ArrayList<>();
+        for (Object did : (List<?>) destinos) {
+            Long destinoId = Long.valueOf(did.toString());
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("destinoId", destinoId);
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> resp = mainClient.post()
+                        .uri("/api/restaurante/assinatura/replicar-cardapio-admin")
+                        .header("X-Admin-Secret", adminSecret)
+                        .body(Map.of("origemId", origemId, "destinoId", destinoId, "modo", modo))
+                        .retrieve()
+                        .body(Map.class);
+                entry.put("ok", true);
+                if (resp != null) entry.putAll(resp);
+            } catch (RestClientResponseException e) {
+                entry.put("ok", false);
+                entry.put("erro", e.getResponseBodyAsString());
+                log.warn("[Replica] destino={} rejeitado: {}", destinoId, e.getResponseBodyAsString());
+            } catch (Exception e) {
+                entry.put("ok", false);
+                entry.put("erro", e.getMessage());
+                log.error("[Replica] destino={} erro: {}", destinoId, e.getMessage());
+            }
+            resultados.add(entry);
+        }
+        log.warn("[Replica] origem={} destinos={} modo={}", origemId, destinos, modo);
+        return ResponseEntity.ok(Map.of("resultados", resultados));
+    }
+
     private PagamentoMensalidadeMain.Status parseEnum(String s) {
         if (s == null || s.isBlank()) return null;
         try { return PagamentoMensalidadeMain.Status.valueOf(s.trim().toUpperCase()); }
