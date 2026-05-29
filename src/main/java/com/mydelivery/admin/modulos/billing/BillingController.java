@@ -14,7 +14,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -147,6 +149,44 @@ public class BillingController {
                     .body(Map.of("erro", e.getResponseBodyAsString()));
         } catch (Exception e) {
             log.error("[Billing] erro ao chamar main API: {}", e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+        }
+    }
+
+    /**
+     * Gera token de impersonação pro admin entrar como restaurante (suporte).
+     * Apenas ADMIN (não FINANCEIRO/SUPORTE). Chama main API com X-Admin-Secret.
+     * Retorna o accessToken, slug e a URL pronta pro painel.
+     */
+    @PostMapping("/impersonar/{restauranteId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> impersonar(
+            @PathVariable Long restauranteId,
+            @AuthenticationPrincipal String adminEmail) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado no Railway"));
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/restaurante/assinatura/impersonar-admin")
+                    .header("X-Admin-Secret", adminSecret)
+                    .body(Map.of(
+                        "restauranteId", restauranteId,
+                        "adminIdentificador", adminEmail != null ? adminEmail : "admin-painel"
+                    ))
+                    .retrieve()
+                    .body(Map.class);
+
+            log.warn("[Impersonation] admin={} → restauranteId={}", adminEmail, restauranteId);
+            return ResponseEntity.ok(resp);
+        } catch (RestClientResponseException e) {
+            log.warn("[Impersonation] main API rejeitou: {}", e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[Impersonation] erro: {}", e.getMessage());
             return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
         }
     }
