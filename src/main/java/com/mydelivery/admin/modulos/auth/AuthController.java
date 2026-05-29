@@ -1,5 +1,7 @@
 package com.mydelivery.admin.modulos.auth;
 
+import java.util.Map;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,5 +40,22 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<MeResponse> me(@AuthenticationPrincipal String email) {
         return ResponseEntity.ok(authService.me(email));
+    }
+
+    /**
+     * Admin altera a própria senha. Body:
+     *   { "senhaAtual": "...", "novaSenha": "...", "confirmar": "..." }
+     */
+    @PostMapping("/alterar-senha")
+    public ResponseEntity<Map<String, Object>> alterarMinhaSenha(
+            @AuthenticationPrincipal String email,
+            @RequestBody Map<String, String> body) {
+        authService.alterarMinhaSenha(
+            email,
+            body != null ? body.get("senhaAtual") : null,
+            body != null ? body.get("novaSenha")  : null,
+            body != null ? body.get("confirmar")  : null
+        );
+        return ResponseEntity.ok(Map.of("ok", true, "mensagem", "Senha alterada com sucesso"));
     }
 }

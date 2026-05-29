@@ -66,6 +66,40 @@ public class AuthService {
                 .build();
     }
 
+    /**
+     * Admin troca a própria senha. Exige a senha atual (anti-uso indevido se
+     * deixar sessão aberta) + nova senha + confirmação.
+     */
+    @Transactional
+    public void alterarMinhaSenha(String emailLogado, String senhaAtual, String novaSenha, String confirmar) {
+        if (senhaAtual == null || senhaAtual.isBlank()) {
+            throw new IllegalArgumentException("Senha atual é obrigatória");
+        }
+        if (novaSenha == null || novaSenha.length() < 6) {
+            throw new IllegalArgumentException("Nova senha precisa ter no mínimo 6 caracteres");
+        }
+        if (novaSenha.length() > 60) {
+            throw new IllegalArgumentException("Nova senha muito longa (máx 60 caracteres)");
+        }
+        if (!novaSenha.equals(confirmar)) {
+            throw new IllegalArgumentException("Nova senha e confirmação não conferem");
+        }
+        if (novaSenha.equals(senhaAtual)) {
+            throw new IllegalArgumentException("A nova senha precisa ser diferente da atual");
+        }
+
+        AdminUser admin = adminUserRepository.findByEmailIgnoreCase(emailLogado)
+                .orElseThrow(() -> new UnauthorizedException("Sessão inválida"));
+
+        if (!passwordEncoder.matches(senhaAtual, admin.getSenhaHash())) {
+            throw new UnauthorizedException("Senha atual incorreta");
+        }
+
+        admin.setSenhaHash(passwordEncoder.encode(novaSenha));
+        adminUserRepository.save(admin);
+        log.info("[AdminAuth] admin={} trocou a própria senha", admin.getEmail());
+    }
+
     public MeResponse me(String email) {
         AdminUser admin = adminUserRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new UnauthorizedException("Sessão inválida"));
