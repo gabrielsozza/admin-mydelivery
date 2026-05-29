@@ -8,6 +8,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +49,22 @@ public class RestaurantesController {
     @GetMapping("/{id}")
     public ResponseEntity<RestauranteDetalheDTO> detalhe(@PathVariable Long id) {
         return ResponseEntity.ok(service.detalhe(id));
+    }
+
+    /**
+     * Redefine senha do dono do restaurante. Usado pelo suporte quando
+     * o cliente perde acesso e o "esqueci minha senha" não funciona.
+     *
+     * Body opcional: {@code { "novaSenha": "abc123" }}.
+     * Se {@code novaSenha} vier vazia/null, gera senha aleatória.
+     * Retorna a senha em texto puro pra admin comunicar ao cliente.
+     */
+    @PostMapping("/{id}/redefinir-senha")
+    public ResponseEntity<Map<String, Object>> redefinirSenha(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        String novaSenha = (body != null) ? body.get("novaSenha") : null;
+        return ResponseEntity.ok(service.redefinirSenha(id, novaSenha));
     }
 
     /**

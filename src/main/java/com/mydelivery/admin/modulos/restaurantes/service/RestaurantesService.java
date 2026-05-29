@@ -1,10 +1,12 @@
 package com.mydelivery.admin.modulos.restaurantes.service;
 
+import java.security.SecureRandom;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.mydelivery.admin.modulos.autocorrecao.service.MainDbWriter;
@@ -27,6 +29,11 @@ public class RestaurantesService {
     private final RestauranteMainRepository restauranteRepo;
     private final UsuarioMainRepository usuarioRepo;
     private final MainDbWriter writer;
+    private final PasswordEncoder passwordEncoder;
+
+    private static final String SENHA_ALFABETO =
+        "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final SecureRandom RNG = new SecureRandom();
 
     /**
      * Busca paginada com filtros.
@@ -67,6 +74,72 @@ public class RestaurantesService {
             }
         }
         return RestauranteDetalheDTO.from(r, donoNome, donoEmail, donoTelefone);
+    }
+
+    /**
+     * Redefine senha do dono do restaurante (uso emergencial pelo suporte).
+     * Se {@code novaSenha} vier vazia, gera uma senha aleatória legível.
+     * Retorna a senha em texto puro pra admin comunicar ao cliente — NÃO fica logada.
+     *
+     * @return Map com: ok, novaSenha (texto puro), email/nome do dono, mensagem
+     */
+    public Map<String, Object> redefinirSenha(Long id, String novaSenha) {
+        RestauranteMain r = restauranteRepo.findById(id)
+                .orElseThrow(() -> new NotFoundException("Restaurante não encontrado"));
+
+        // Senha custom OU gerada
+        String senhaPlana;
+        boolean gerada = (novaSenha == null || novaSenha.isBlank());
+        if (gerada) {
+            senhaPlana = gerarSenhaAleatoria(10);
+        } else {
+            senhaPlana = novaSenha.trim();
+            if (senhaPlana.length() < 6) {
+                throw new IllegalArgumentException("Senha precisa ter no mínimo 6 caracteres");
+            }
+            if (senhaPlana.length() > 60) {
+                throw new IllegalArgumentException("Senha muito longa (máx 60 caracteres)");
+            }
+        }
+
+        String hash = passwordEncoder.encode(senhaPlana);
+        int linhas = writer.redefinirSenhaDoRestaurante(id, hash);
+        if (linhas == 0) {
+            throw new IllegalStateException("Não foi possível redefinir senha (usuário sem vínculo)");
+        }
+
+        // Pega email/nome do dono pra admin saber pra quem mandar
+        String donoEmail = null, donoNome = null;
+        if (r.getUsuarioId() != null) {
+            var u = usuarioRepo.findById(r.getUsuarioId()).orElse(null);
+            if (u != null) {
+                donoEmail = u.getEmail();
+                donoNome = u.getNome();
+            }
+        }
+
+        log.warn("[Restaurante] REDEFINIR SENHA id={} nome={} donoEmail={} gerada={}",
+                id, r.getNome(), donoEmail, gerada);
+
+        return Map.of(
+            "ok", true,
+            "restauranteId", id,
+            "restauranteNome", r.getNome() != null ? r.getNome() : "",
+            "donoNome", donoNome != null ? donoNome : "",
+            "donoEmail", donoEmail != null ? donoEmail : "",
+            "novaSenha", senhaPlana,
+            "geradaAutomaticamente", gerada,
+            "mensagem", "Senha redefinida. Comunique ao cliente — esta tela não vai mostrar a senha de novo."
+        );
+    }
+
+    /** Senha aleatória legível (sem caracteres ambíguos como 0/O/1/l). */
+    private static String gerarSenhaAleatoria(int len) {
+        StringBuilder sb = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            sb.append(SENHA_ALFABETO.charAt(RNG.nextInt(SENHA_ALFABETO.length())));
+        }
+        return sb.toString();
     }
 
     /**

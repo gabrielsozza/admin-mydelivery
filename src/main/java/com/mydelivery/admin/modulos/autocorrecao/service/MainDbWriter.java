@@ -89,6 +89,52 @@ public class MainDbWriter {
     }
 
     /**
+     * Redefine senha do dono do restaurante (uso emergencial — suporte).
+     * Atualiza diretamente o senha_hash do usuario associado.
+     * Também apaga password_reset_tokens pendentes do mesmo usuário (evita confusão).
+     *
+     * @param restauranteId id do restaurante
+     * @param novaSenhaHashBcrypt senha JÁ HASHEADA (BCrypt) — feita no service
+     * @return 1 se atualizou, 0 se restaurante não tem usuario_id
+     */
+    @Transactional(transactionManager = "mainTransactionManager")
+    public int redefinirSenhaDoRestaurante(Long restauranteId, String novaSenhaHashBcrypt) {
+        if (restauranteId == null) throw new IllegalArgumentException("restauranteId null");
+        if (novaSenhaHashBcrypt == null || novaSenhaHashBcrypt.isBlank()) {
+            throw new IllegalArgumentException("senha hash vazia");
+        }
+        if (!novaSenhaHashBcrypt.startsWith("$2")) {
+            // Sanity check: BCrypt sempre começa com $2a/$2b/$2y
+            throw new IllegalArgumentException("hash inválido (precisa ser BCrypt)");
+        }
+
+        Long usuarioId;
+        try {
+            usuarioId = jdbc.queryForObject(
+                "SELECT usuario_id FROM restaurantes WHERE id = ?",
+                Long.class, restauranteId);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            throw new IllegalStateException("Restaurante " + restauranteId + " não encontrado");
+        }
+        if (usuarioId == null) return 0;
+
+        int linhas = jdbc.update(
+            "UPDATE usuarios SET senha_hash = ? WHERE id = ?",
+            novaSenhaHashBcrypt, usuarioId);
+
+        // Limpa tokens pendentes de recuperação (segurança)
+        try {
+            jdbc.update("DELETE FROM password_reset_tokens WHERE usuario_id = ?", usuarioId);
+        } catch (Exception e) {
+            log.warn("[MainDbWriter] não consegui limpar reset tokens do usuario={}: {}", usuarioId, e.getMessage());
+        }
+
+        log.warn("[MainDbWriter] REDEFINIR SENHA restauranteId={} usuarioId={} linhas={}",
+                restauranteId, usuarioId, linhas);
+        return linhas;
+    }
+
+    /**
      * Bloqueia restaurante manualmente (admin) + marca assinatura como INADIMPLENTE.
      * Aceita restaurante em qualquer status (ATIVO/TRIAL/PENDENTE) — só não sobrescreve
      * se já está BLOQUEADO.
