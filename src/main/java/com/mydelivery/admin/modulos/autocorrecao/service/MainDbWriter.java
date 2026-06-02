@@ -597,6 +597,11 @@ public class MainDbWriter {
             "DELETE FROM compras WHERE restaurante_id = ?", restauranteId));
 
         // ─── 4. PRODUTOS (complementos, ficha técnica, categorias) ──────
+        // banners.produto_id → produtos.id sem ON DELETE CASCADE. Limpa antes
+        // pra não estourar "FKfqctpljepw8fc2ag42bv5iaya" no DELETE FROM produtos.
+        stats.put("banners", jdbc.update(
+            "DELETE FROM banners WHERE restaurante_id = ?", restauranteId));
+
         stats.put("complementos_item", jdbc.update("""
             DELETE ci FROM complementos_item ci
               JOIN complementos_grupo cg ON cg.id = ci.grupo_id
