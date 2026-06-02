@@ -573,6 +573,16 @@ public class MainDbWriter {
              WHERE c.restaurante_id = ?
             """, restauranteId));
 
+        // cupom_modos = @ElementCollection do Cupom.modosAplicaveis. FK pra cupons
+        // sem ON DELETE CASCADE no schema gerado pelo Hibernate — precisa
+        // limpar manualmente antes do DELETE FROM cupons, senão estoura
+        // FK constraint (railway.cupom_modos / FKpkrglgquw6ipdbuk7ui3nw2h4).
+        stats.put("cupom_modos", jdbc.update("""
+            DELETE cm FROM cupom_modos cm
+              JOIN cupons c ON c.id = cm.cupom_id
+             WHERE c.restaurante_id = ?
+            """, restauranteId));
+
         stats.put("cupons", jdbc.update(
             "DELETE FROM cupons WHERE restaurante_id = ?", restauranteId));
 
