@@ -8,8 +8,14 @@ import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.mydelivery.admin.modulos.whatsapp.dto.WhatsappInstanceDetalheDTO;
 import com.mydelivery.admin.modulos.whatsapp.dto.WhatsappInstanceListDTO;
@@ -29,12 +35,33 @@ import lombok.RequiredArgsConstructor;
  * responsabilidade do main app).
  */
 @Service
-@RequiredArgsConstructor
 public class WhatsappAdminService {
 
     private final WhatsappInstanceMainRepository repo;
     private final RestauranteMainRepository restauranteRepo;
     private final EvolutionAdminClient evolution;
+    private final RestClient mainClient;
+    private final String adminSecret;
+
+    public WhatsappAdminService(
+            WhatsappInstanceMainRepository repo,
+            RestauranteMainRepository restauranteRepo,
+            EvolutionAdminClient evolution,
+            @Value("${mydelivery.main-api.base-url:${MAIN_API_BASE_URL:https://api.mydeliveryfood.com.br}}") String mainBaseUrl,
+            @Value("${mydelivery.admin.internal-secret:${ADMIN_INTERNAL_SECRET:}}") String adminSecret) {
+        this.repo = repo;
+        this.restauranteRepo = restauranteRepo;
+        this.evolution = evolution;
+        this.adminSecret = adminSecret;
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout((int) java.time.Duration.ofSeconds(10).toMillis());
+        factory.setReadTimeout((int) java.time.Duration.ofSeconds(15).toMillis());
+        this.mainClient = RestClient.builder()
+                .baseUrl(mainBaseUrl)
+                .requestFactory(factory)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .build();
+    }
 
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public WhatsappResumoDTO resumo() {
@@ -122,8 +149,65 @@ public class WhatsappAdminService {
         if (inst.getInstanceName() == null || inst.getInstanceName().isBlank()) {
             throw new RuntimeException("Instância sem nome configurado");
         }
-        evolution.restart(inst.getInstanceName());
-        return Map.of("ok", true, "instanceName", inst.getInstanceName());
+        // Chama o endpoint novo do main-api — ele registra tentativa + chama
+        // Evolution. Assim a contagem de tentativas/snapshot fica consistente.
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/admin-internal/whatsapp/{name}/reconectar", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            Map<String, Object> out = new HashMap<>();
+            out.put("ok", resp != null && Boolean.TRUE.equals(resp.get("ok")));
+            out.put("instanceName", inst.getInstanceName());
+            if (resp != null) out.putAll(resp);
+            return out;
+        } catch (RestClientResponseException e) {
+            // Fallback: chama Evolution direto (comportamento antigo)
+            evolution.restart(inst.getInstanceName());
+            return Map.of("ok", true, "instanceName", inst.getInstanceName(),
+                    "aviso", "main-api indisponível, usado fallback direto");
+        }
+    }
+
+    /** Saúde REAL — proxy pro main-api que tem o heartbeat de mensagens. */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public Map<String, Object> saude(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.get()
+                    .uri("/api/admin-internal/whatsapp/{name}/saude", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            return resp != null ? resp : Map.of("erro", "resposta vazia");
+        } catch (RestClientResponseException e) {
+            return Map.of("erro", "main-api retornou " + e.getStatusCode(),
+                    "detalhe", e.getResponseBodyAsString());
+        } catch (Exception e) {
+            return Map.of("erro", e.getMessage());
+        }
+    }
+
+    /** Histórico 24h pra gráfico. */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public List<Map<String, Object>> historicoSaude(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> resp = mainClient.get()
+                    .uri("/api/admin-internal/whatsapp/{name}/historico", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(List.class);
+            return resp != null ? resp : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**

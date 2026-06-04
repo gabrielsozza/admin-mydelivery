@@ -84,4 +84,23 @@ public class WhatsappController {
     public ResponseEntity<Map<String, Object>> healthCheck(@PathVariable Long id) {
         return ResponseEntity.ok(service.healthCheck(id));
     }
+
+    /**
+     * Saúde REAL do bot — combina status enum + heartbeat de mensagens recebidas.
+     * Devolve estado: OPERACIONAL / INSTAVEL / OFFLINE.
+     * Inclui contador de minutos sem mensagem pra debug.
+     */
+    @GetMapping("/{id}/saude")
+    public ResponseEntity<Map<String, Object>> saude(@PathVariable Long id) {
+        return ResponseEntity.ok(service.saude(id));
+    }
+
+    /**
+     * Histórico das últimas 24h pra gráfico de acompanhamento.
+     * Cada item: { em, estado, minutosSemMensagem, reconexaoDisparada }.
+     */
+    @GetMapping("/{id}/historico-saude")
+    public ResponseEntity<List<Map<String, Object>>> historicoSaude(@PathVariable Long id) {
+        return ResponseEntity.ok(service.historicoSaude(id));
+    }
 }
