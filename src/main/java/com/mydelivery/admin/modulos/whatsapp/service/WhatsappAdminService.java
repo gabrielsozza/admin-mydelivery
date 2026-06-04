@@ -216,6 +216,73 @@ public class WhatsappAdminService {
         }
     }
 
+    /** Lista incidentes (abertos ou todos recentes). Direto no main, sem id local. */
+    public List<Map<String, Object>> listarIncidentes(boolean apenasAbertos) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> resp = mainClient.get()
+                    .uri(uri -> uri.path("/api/admin-internal/whatsapp/incidentes")
+                            .queryParam("aberto", apenasAbertos).build())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(List.class);
+            return resp != null ? resp : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** Alertas ativos (abertos + não-acked). */
+    public List<Map<String, Object>> listarAlertasAtivos() {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> resp = mainClient.get()
+                    .uri("/api/admin-internal/whatsapp/incidentes/alertas-ativos")
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(List.class);
+            return resp != null ? resp : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** Ações automáticas (filtro opcional por incidente). */
+    public List<Map<String, Object>> listarAcoes(Long incidenteId) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> resp = mainClient.get()
+                    .uri(uri -> {
+                        var b = uri.path("/api/admin-internal/whatsapp/acoes");
+                        if (incidenteId != null) b.queryParam("incidente", incidenteId);
+                        return b.build();
+                    })
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(List.class);
+            return resp != null ? resp : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** Marca incidente como visto (silencia alerta sem fechar). */
+    public Map<String, Object> ackIncidente(Long incidenteId, String operador) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri(uri -> uri.path("/api/admin-internal/whatsapp/incidentes/{id}/ack")
+                            .queryParam("operador", operador == null ? "admin" : operador)
+                            .build(incidenteId))
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            return resp != null ? resp : Map.of("ok", false);
+        } catch (Exception e) {
+            return Map.of("ok", false, "erro", e.getMessage());
+        }
+    }
+
     /** Últimos N webhooks recebidos da Evolution pra essa instância. */
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public Map<String, Object> eventos(Long instanceId) {

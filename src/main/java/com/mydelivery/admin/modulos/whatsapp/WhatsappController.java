@@ -120,4 +120,30 @@ public class WhatsappController {
     public ResponseEntity<Map<String, Object>> eventos(@PathVariable Long id) {
         return ResponseEntity.ok(service.eventos(id));
     }
+
+    // ──────────── INCIDENTES / ALERTAS ────────────
+
+    @GetMapping("/incidentes")
+    public ResponseEntity<List<Map<String, Object>>> listarIncidentes(
+            @RequestParam(defaultValue = "false") boolean aberto) {
+        return ResponseEntity.ok(service.listarIncidentes(aberto));
+    }
+
+    @GetMapping("/incidentes/alertas-ativos")
+    public ResponseEntity<List<Map<String, Object>>> alertasAtivos() {
+        return ResponseEntity.ok(service.listarAlertasAtivos());
+    }
+
+    @GetMapping("/acoes")
+    public ResponseEntity<List<Map<String, Object>>> listarAcoes(
+            @RequestParam(required = false) Long incidente) {
+        return ResponseEntity.ok(service.listarAcoes(incidente));
+    }
+
+    @PostMapping("/incidentes/{id}/ack")
+    public ResponseEntity<Map<String, Object>> ackIncidente(
+            @PathVariable Long id,
+            @RequestParam(required = false) String operador) {
+        return ResponseEntity.ok(service.ackIncidente(id, operador));
+    }
 }
