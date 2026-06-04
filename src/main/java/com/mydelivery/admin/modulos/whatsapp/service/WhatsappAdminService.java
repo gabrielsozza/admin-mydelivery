@@ -192,6 +192,48 @@ public class WhatsappAdminService {
         }
     }
 
+    /**
+     * RESET COMPLETO da instância — destrava número shadow-banned. Diferente do
+     * restart (refresca só o socket): apaga sessão na Evolution e exige novo QR.
+     */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public Map<String, Object> resetFull(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/admin-internal/whatsapp/{name}/reset-full", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            return resp != null ? resp : Map.of("ok", false, "erro", "resposta vazia");
+        } catch (RestClientResponseException e) {
+            return Map.of("ok", false, "erro", "main-api " + e.getStatusCode(),
+                    "detalhe", e.getResponseBodyAsString());
+        } catch (Exception e) {
+            return Map.of("ok", false, "erro", e.getMessage());
+        }
+    }
+
+    /** Últimos N webhooks recebidos da Evolution pra essa instância. */
+    @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
+    public Map<String, Object> eventos(Long instanceId) {
+        WhatsappInstanceMain inst = repo.findById(instanceId)
+                .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.get()
+                    .uri("/api/admin-internal/whatsapp/{name}/eventos", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            return resp != null ? resp : Map.of("erro", "resposta vazia");
+        } catch (Exception e) {
+            return Map.of("erro", e.getMessage());
+        }
+    }
+
     /** Histórico 24h pra gráfico. */
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public List<Map<String, Object>> historicoSaude(Long instanceId) {

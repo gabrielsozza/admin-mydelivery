@@ -103,4 +103,21 @@ public class WhatsappController {
     public ResponseEntity<List<Map<String, Object>>> historicoSaude(@PathVariable Long id) {
         return ResponseEntity.ok(service.historicoSaude(id));
     }
+
+    /**
+     * RESET COMPLETO — destrava número shadow-banned. Apaga sessão na Evolution
+     * e o restaurante precisa escanear NOVO QR. Use quando restart já tentou
+     * várias vezes e o bot continua mudo.
+     */
+    @PostMapping("/{id}/reset-full")
+    public ResponseEntity<Map<String, Object>> resetFull(@PathVariable Long id) {
+        return ResponseEntity.ok(service.resetFull(id));
+    }
+
+    /** Últimos webhooks recebidos da Evolution — distingue Evolution muda
+     *  vs WhatsApp silenciando mensagens vs erro de processamento. */
+    @GetMapping("/{id}/eventos")
+    public ResponseEntity<Map<String, Object>> eventos(@PathVariable Long id) {
+        return ResponseEntity.ok(service.eventos(id));
+    }
 }
