@@ -31,7 +31,10 @@ public class PedidoMain {
     @Column(name = "restaurante_id")
     private Long restauranteId;
 
-    @Column(name = "valor_total")
+    /** Coluna real no main é "total" (não "valor_total"). Antes o admin
+     *  mapeava errado e somava uma coluna fantasma criada pelo ddl-auto,
+     *  sempre NULL → GMV aparecia R$ 0 mesmo com pedidos cadastrados. */
+    @Column(name = "total")
     private BigDecimal valorTotal;
 
     /** Ex.: CRIADO, CONFIRMADO, PREPARANDO, PRONTO, A_CAMINHO, ENTREGUE, CANCELADO. */

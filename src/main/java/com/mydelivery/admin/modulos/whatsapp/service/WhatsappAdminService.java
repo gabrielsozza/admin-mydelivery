@@ -216,6 +216,22 @@ public class WhatsappAdminService {
         }
     }
 
+    /** Agregado horário das últimas N horas pro gráfico global do dashboard. */
+    public List<Map<String, Object>> saudeGlobal(int horas) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> resp = mainClient.get()
+                    .uri(uri -> uri.path("/api/admin-internal/whatsapp/saude-global")
+                            .queryParam("horas", horas).build())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(List.class);
+            return resp != null ? resp : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     /** Lista incidentes (abertos ou todos recentes). Direto no main, sem id local. */
     public List<Map<String, Object>> listarIncidentes(boolean apenasAbertos) {
         try {

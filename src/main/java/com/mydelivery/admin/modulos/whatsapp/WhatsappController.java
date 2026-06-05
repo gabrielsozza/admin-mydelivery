@@ -123,6 +123,13 @@ public class WhatsappController {
 
     // ──────────── INCIDENTES / ALERTAS ────────────
 
+    /** Agregado horário pro gráfico do dashboard (saúde global do bot). */
+    @GetMapping("/saude-global")
+    public ResponseEntity<List<Map<String, Object>>> saudeGlobal(
+            @RequestParam(defaultValue = "12") int horas) {
+        return ResponseEntity.ok(service.saudeGlobal(horas));
+    }
+
     @GetMapping("/incidentes")
     public ResponseEntity<List<Map<String, Object>>> listarIncidentes(
             @RequestParam(defaultValue = "false") boolean aberto) {
