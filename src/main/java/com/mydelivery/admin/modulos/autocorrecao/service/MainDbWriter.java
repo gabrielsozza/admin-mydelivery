@@ -641,6 +641,14 @@ public class MainDbWriter {
         stats.put("chamadas_garcom", jdbc.update(
             "DELETE FROM chamadas_garcom WHERE restaurante_id = ?", restauranteId));
 
+        // mesa_sessoes.mesa_id → mesas.id (FK sem ON DELETE CASCADE).
+        // Sem isso, o DELETE FROM mesas estourava
+        // "FKbe9hnm31j17jct3r6218rxcr9". A coluna restaurante_id em
+        // mesa_sessoes e' denormalizada justamente pra esse cleanup
+        // ser direto, sem JOIN.
+        stats.put("mesa_sessoes", jdbc.update(
+            "DELETE FROM mesa_sessoes WHERE restaurante_id = ?", restauranteId));
+
         stats.put("mesas", jdbc.update(
             "DELETE FROM mesas WHERE restaurante_id = ?", restauranteId));
 
