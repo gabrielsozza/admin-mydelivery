@@ -20,7 +20,8 @@ import lombok.NoArgsConstructor;
  * evitar coupling com a entidade Restaurante. O nome do restaurante é resolvido
  * via {@link RestauranteMainRepository} no service.
  *
- * Status do main: TRIAL | ATIVA | INADIMPLENTE | CANCELADA
+ * Status do main: TRIAL | ATIVA | PENDENTE | INADIMPLENTE | CANCELADA
+ * (PENDENTE = assinatura criada mas aguardando confirmacao de pagamento)
  * Plano (FK enum): MENSAL | SEMESTRAL | ANUAL (null durante TRIAL)
  */
 @Entity
@@ -64,6 +65,6 @@ public class AssinaturaMain {
     private LocalDateTime canceladoEm;
 
     public enum Status {
-        TRIAL, ATIVA, INADIMPLENTE, CANCELADA
+        TRIAL, ATIVA, PENDENTE, INADIMPLENTE, CANCELADA
     }
 }

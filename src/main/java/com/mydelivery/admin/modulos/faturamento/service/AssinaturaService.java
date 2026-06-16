@@ -144,9 +144,10 @@ public class AssinaturaService {
     // ─── MAPEAMENTO ──────────────────────────────────────────────────────
 
     private AssinaturaDTO toDTO(AssinaturaMain a, String restauranteNome) {
-        // Status mapping pra alinhar com DTO antigo (ATIVA/SUSPENSA/CANCELADA)
+        // Status mapping pra alinhar com DTO antigo (ATIVA/SUSPENSA/CANCELADA/PENDENTE)
         String statusAdmin = switch (a.getStatus()) {
             case ATIVA, TRIAL -> "ATIVA";
+            case PENDENTE     -> "PENDENTE";
             case INADIMPLENTE -> "SUSPENSA";
             case CANCELADA    -> "CANCELADA";
         };
