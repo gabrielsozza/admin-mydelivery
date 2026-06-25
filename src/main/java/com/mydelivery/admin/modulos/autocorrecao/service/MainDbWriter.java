@@ -694,6 +694,35 @@ public class MainDbWriter {
             "DELETE FROM suporte_tickets WHERE restaurante_id = ?", restauranteId));
 
         // ─── 11. WHATSAPP ───────────────────────────────────────────────
+        // Ordem topológica respeitando FKs:
+        //  - whatsapp_acoes_automaticas → FK pra whatsapp_incidentes E whatsapp_instances
+        //  - whatsapp_health_log        → FK pra whatsapp_instances
+        //  - whatsapp_incidentes        → FK pra whatsapp_instances
+        //  - whatsapp_instances         → linha-mãe
+        //
+        // Antes só o último DELETE rodava e a FK estourava com:
+        //   "Cannot delete or update a parent row: a foreign key constraint
+        //    fails (whatsapp_health_log/.../incidentes)".
+        // O JOIN amarra o filho à instância via instance_id pra filtrar só
+        // os registros desse restaurante.
+        stats.put("whatsapp_acoes_automaticas", jdbc.update("""
+            DELETE wa FROM whatsapp_acoes_automaticas wa
+              JOIN whatsapp_instances wi ON wi.id = wa.instance_id
+             WHERE wi.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("whatsapp_health_log", jdbc.update("""
+            DELETE hl FROM whatsapp_health_log hl
+              JOIN whatsapp_instances wi ON wi.id = hl.instance_id
+             WHERE wi.restaurante_id = ?
+            """, restauranteId));
+
+        stats.put("whatsapp_incidentes", jdbc.update("""
+            DELETE wi2 FROM whatsapp_incidentes wi2
+              JOIN whatsapp_instances wi ON wi.id = wi2.instance_id
+             WHERE wi.restaurante_id = ?
+            """, restauranteId));
+
         stats.put("whatsapp_instances", jdbc.update(
             "DELETE FROM whatsapp_instances WHERE restaurante_id = ?", restauranteId));
 
