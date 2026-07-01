@@ -24,11 +24,29 @@ public interface WhatsappInstanceMainRepository extends JpaRepository<WhatsappIn
 
     long countByStatus(WhatsappInstanceMain.Status status);
 
-    /** Instâncias problemáticas pra alerta no dashboard: DESCONECTADA + ERRO. */
+    /** DESCONECTADAS por queda inesperada (NÃO conta as manuais). */
+    @Query("""
+        SELECT COUNT(w) FROM WhatsappInstanceMain w
+        WHERE w.status = com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.DESCONECTADA
+          AND (w.desconectadoManualmente IS NULL OR w.desconectadoManualmente = false)
+        """)
+    long countDesconectadasInesperadas();
+
+    /** DESCONECTADAS pelo próprio dono (fluxo normal — informativo, não alerta). */
+    @Query("""
+        SELECT COUNT(w) FROM WhatsappInstanceMain w
+        WHERE w.status = com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.DESCONECTADA
+          AND w.desconectadoManualmente = true
+        """)
+    long countDesconectadasManuais();
+
+    /** Instâncias problemáticas pra alerta no dashboard: DESCONECTADA INESPERADA + ERRO.
+     *  Importante: EXCLUI desconectados manualmente (não é problema). */
     @Query("""
         SELECT w FROM WhatsappInstanceMain w
-        WHERE w.status IN (com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.DESCONECTADA,
-                            com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.ERRO)
+        WHERE (w.status = com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.DESCONECTADA
+                AND (w.desconectadoManualmente IS NULL OR w.desconectadoManualmente = false))
+           OR w.status = com.mydelivery.admin.shared.main.entity.WhatsappInstanceMain.Status.ERRO
         ORDER BY w.atualizadoEm DESC
         """)
     List<WhatsappInstanceMain> findProblematicas(Pageable pageable);

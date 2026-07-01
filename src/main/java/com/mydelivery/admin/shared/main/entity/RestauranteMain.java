@@ -75,6 +75,25 @@ public class RestauranteMain {
     @Column(name = "criado_em")
     private LocalDateTime criadoEm;
 
+    // ── Vínculo com afiliado (snapshot imutável salvo no cadastro) ──
+    @Column(name = "afiliado_codigo")
+    private String afiliadoCodigo;
+
+    @Column(name = "afiliado_id_snap")
+    private Long afiliadoIdSnap;
+
+    @Column(name = "afiliado_nome_snap")
+    private String afiliadoNomeSnap;
+
+    @Column(name = "afiliado_email_snap")
+    private String afiliadoEmailSnap;
+
+    @Column(name = "afiliado_comissao_snap")
+    private java.math.BigDecimal afiliadoComissaoSnap;
+
+    @Column(name = "afiliado_vinculado_em")
+    private LocalDateTime afiliadoVinculadoEm;
+
     /** Espelha o enum Status do projeto principal. */
     public enum Status {
         ATIVO, BLOQUEADO, TRIAL, CANCELADO

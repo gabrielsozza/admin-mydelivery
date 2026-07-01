@@ -52,6 +52,17 @@ public class WhatsappInstanceMain {
     @Column(name = "bot_ativo")
     private Boolean botAtivo;
 
+    /** TRUE = dono desconectou pelo painel (fluxo NORMAL — não é problema).
+     *  FALSE = queda inesperada (webhook close OU heartbeat morreu). */
+    @Column(name = "desconectado_manualmente")
+    private Boolean desconectadoManualmente;
+
+    @Column(name = "ultima_queda_em")
+    private LocalDateTime ultimaQuedaEm;
+
+    @Column(name = "motivo_ultima_queda", length = 120)
+    private String motivoUltimaQueda;
+
     @Column(name = "criado_em")
     private LocalDateTime criadoEm;
 

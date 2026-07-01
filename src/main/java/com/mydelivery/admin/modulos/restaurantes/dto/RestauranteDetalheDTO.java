@@ -40,6 +40,16 @@ public class RestauranteDetalheDTO {
     private String donoEmail;
     private String donoTelefone;
 
+    // ── Vínculo com afiliado (snapshot imutável salvo no cadastro) ──
+    // Só preenchido se o restaurante veio via link/código de afiliado.
+    // Uso INTERNO do admin — não exposto ao restaurante.
+    private String afiliadoCodigo;
+    private Long afiliadoId;
+    private String afiliadoNome;
+    private String afiliadoEmail;
+    private BigDecimal afiliadoComissao;
+    private LocalDateTime afiliadoVinculadoEm;
+
     public static RestauranteDetalheDTO from(RestauranteMain r) {
         return from(r, null, null, null);
     }
@@ -68,6 +78,12 @@ public class RestauranteDetalheDTO {
                 .donoNome(donoNome)
                 .donoEmail(donoEmail)
                 .donoTelefone(donoTelefone)
+                .afiliadoCodigo(r.getAfiliadoCodigo())
+                .afiliadoId(r.getAfiliadoIdSnap())
+                .afiliadoNome(r.getAfiliadoNomeSnap())
+                .afiliadoEmail(r.getAfiliadoEmailSnap())
+                .afiliadoComissao(r.getAfiliadoComissaoSnap())
+                .afiliadoVinculadoEm(r.getAfiliadoVinculadoEm())
                 .build();
     }
 }

@@ -65,14 +65,22 @@ public class WhatsappAdminService {
 
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public WhatsappResumoDTO resumo() {
+        long desconectadasTotal = repo.countByStatus(WhatsappInstanceMain.Status.DESCONECTADA);
+        long desconectadasInesperadas = repo.countDesconectadasInesperadas();
+        long desconectadasManual = repo.countDesconectadasManuais();
+        long erros = repo.countByStatus(WhatsappInstanceMain.Status.ERRO);
         return WhatsappResumoDTO.builder()
                 .total(repo.count())
                 .conectadas(repo.countByStatus(WhatsappInstanceMain.Status.CONECTADA))
                 .aguardandoQr(repo.countByStatus(WhatsappInstanceMain.Status.AGUARDANDO_QR))
-                .desconectadas(repo.countByStatus(WhatsappInstanceMain.Status.DESCONECTADA))
-                .erros(repo.countByStatus(WhatsappInstanceMain.Status.ERRO))
+                .desconectadas(desconectadasTotal)
+                .desconectadasInesperadas(desconectadasInesperadas)
+                .desconectadasManual(desconectadasManual)
+                .erros(erros)
                 .novas(repo.countByStatus(WhatsappInstanceMain.Status.NOVA))
-                .botInativo(0L) // contagem específica via query nova se virar prioridade
+                .botInativo(0L)
+                // PROBLEMA REAL = queda inesperada + erros (NÃO conta manual)
+                .comProblema(desconectadasInesperadas + erros)
                 .build();
     }
 
