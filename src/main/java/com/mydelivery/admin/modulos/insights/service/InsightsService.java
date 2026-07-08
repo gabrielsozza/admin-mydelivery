@@ -61,8 +61,15 @@ public class InsightsService {
     @Transactional(readOnly = true)
     public VisaoGeralDTO visaoGeral() {
         LocalDateTime agora = LocalDateTime.now();
-        LocalDateTime ha30dias = agora.minusDays(30);
-        LocalDateTime ha60dias = agora.minusDays(60);
+        // Fix Jul/2026: `agora.minusDays(30)` faz janela deslizante segundo-a-segundo.
+        // Cada refresh dentro do mesmo dia "come" a ponta antiga da janela e pedidos
+        // feitos exatamente 30 dias atrás naquele mesmo horário SAEM — o contador
+        // aparentemente diminui do nada pro admin, especialmente em horários de
+        // baixo tráfego (madrugada) onde pedidos novos não compensam. Alinhamos
+        // agora ao INÍCIO do dia (00:00 de 30 dias atrás): número só sobe durante
+        // o dia; à meia-noite o dia mais antigo cai de bloco.
+        LocalDateTime ha30dias = java.time.LocalDate.now().minusDays(30).atStartOfDay();
+        LocalDateTime ha60dias = java.time.LocalDate.now().minusDays(60).atStartOfDay();
 
         KpiFinanceiroDTO kpis = kpiService.calcular();
 
@@ -118,7 +125,9 @@ public class InsightsService {
         if (limite < 1 || limite > 100) limite = 10;
         if (dias < 1) dias = 30;
         LocalDateTime fim = LocalDateTime.now();
-        LocalDateTime inicio = fim.minusDays(dias);
+        // Mesmo motivo do visaoGeral: janela alinhada a 00:00 pra o ranking
+        // não mudar arbitrariamente entre refreshes do mesmo dia.
+        LocalDateTime inicio = java.time.LocalDate.now().minusDays(dias).atStartOfDay();
 
         List<Object[]> rows;
         try {
