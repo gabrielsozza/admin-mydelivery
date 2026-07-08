@@ -149,6 +149,85 @@ public class RestaurantesService {
      *
      * @return map com contadores por tabela (auditoria)
      */
+    /**
+     * Vincula manualmente um restaurante a um afiliado (ou remove o vínculo).
+     *
+     * Contexto: normalmente o vínculo é criado no cadastro (link com ?ref=X)
+     * e é imutável pra o dono do restaurante — ele não muda quem tem direito
+     * à comissão dele. Este método permite o ADMIN corrigir situações
+     * excepcionais: loja que entrou sem link, digitou errado, ou precisa
+     * ser realocada.
+     *
+     * Dados persistidos como snapshot: código + id + nome + email + comissão
+     * ficam gravados no restaurante mesmo se o afiliado for depois excluído.
+     * Isso preserva histórico da comissão devida em pagamentos passados.
+     *
+     * @param dadosAfiliado null pra REMOVER vínculo, senão preenche snapshot
+     */
+    @org.springframework.transaction.annotation.Transactional(transactionManager = "mainTransactionManager")
+    public Map<String, Object> vincularAfiliado(Long restauranteId,
+                                                Map<String, Object> dadosAfiliado) {
+        RestauranteMain r = restauranteRepo.findById(restauranteId)
+                .orElseThrow(() -> new NotFoundException("Restaurante não encontrado"));
+
+        String antigoCodigo = r.getAfiliadoCodigo();
+
+        if (dadosAfiliado == null || dadosAfiliado.isEmpty()) {
+            // DESVINCULAR — zera todos os campos snap
+            r.setAfiliadoCodigo(null);
+            r.setAfiliadoIdSnap(null);
+            r.setAfiliadoNomeSnap(null);
+            r.setAfiliadoEmailSnap(null);
+            r.setAfiliadoComissaoSnap(null);
+            r.setAfiliadoVinculadoEm(null);
+            restauranteRepo.save(r);
+            log.warn("[Afiliado] restaurante {} DESVINCULADO (era {})", restauranteId, antigoCodigo);
+            return Map.of(
+                "ok", true,
+                "restauranteId", restauranteId,
+                "vinculado", false,
+                "codigoAnterior", antigoCodigo == null ? "" : antigoCodigo
+            );
+        }
+
+        String codigo = String.valueOf(dadosAfiliado.get("codigo"));
+        if (codigo == null || codigo.isBlank() || "null".equals(codigo)) {
+            throw new IllegalArgumentException("codigo do afiliado é obrigatório");
+        }
+        r.setAfiliadoCodigo(codigo.trim());
+        r.setAfiliadoIdSnap(parseLong(dadosAfiliado.get("id")));
+        r.setAfiliadoNomeSnap(nullSafe(dadosAfiliado.get("nome")));
+        r.setAfiliadoEmailSnap(nullSafe(dadosAfiliado.get("email")));
+        Object comissaoRaw = dadosAfiliado.get("comissao");
+        if (comissaoRaw != null) {
+            try {
+                r.setAfiliadoComissaoSnap(new java.math.BigDecimal(comissaoRaw.toString()));
+            } catch (NumberFormatException ignore) {}
+        }
+        r.setAfiliadoVinculadoEm(java.time.LocalDateTime.now());
+        restauranteRepo.save(r);
+        log.warn("[Afiliado] restaurante {} vinculado a codigo={} nome={} (antes: {})",
+                restauranteId, codigo, r.getAfiliadoNomeSnap(), antigoCodigo);
+        return Map.of(
+            "ok", true,
+            "restauranteId", restauranteId,
+            "vinculado", true,
+            "codigoAnterior", antigoCodigo == null ? "" : antigoCodigo,
+            "codigoNovo", codigo,
+            "nome", r.getAfiliadoNomeSnap() == null ? "" : r.getAfiliadoNomeSnap()
+        );
+    }
+
+    private static Long parseLong(Object o) {
+        if (o == null) return null;
+        try { return Long.valueOf(o.toString()); } catch (Exception e) { return null; }
+    }
+    private static String nullSafe(Object o) {
+        if (o == null) return null;
+        String s = o.toString().trim();
+        return s.isEmpty() ? null : s;
+    }
+
     public Map<String, Integer> apagarDefinitivamente(Long id) {
         // Valida que existe antes (mensagem clara em vez de erro silencioso)
         RestauranteMain r = restauranteRepo.findById(id)

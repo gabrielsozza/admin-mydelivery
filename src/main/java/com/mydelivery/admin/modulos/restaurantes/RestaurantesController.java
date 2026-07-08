@@ -45,14 +45,19 @@ public class RestaurantesController {
 
     private final RestaurantesService service;
     private final RestClient mainClient;
+    private final RestClient afiliadosClient;
     private final String adminSecret;
+    private final String afiliadosSecret;
 
     public RestaurantesController(
             RestaurantesService service,
             @Value("${mydelivery.main-api.base-url:${MAIN_API_BASE_URL:https://api.mydeliveryfood.com.br}}") String mainBaseUrl,
-            @Value("${mydelivery.admin.internal-secret:${ADMIN_INTERNAL_SECRET:}}") String adminSecret) {
+            @Value("${mydelivery.admin.internal-secret:${ADMIN_INTERNAL_SECRET:}}") String adminSecret,
+            @Value("${mydelivery.afiliados.api-base-url:${AFILIADOS_API_BASE_URL:}}") String afiliadosBaseUrl,
+            @Value("${mydelivery.afiliados.admin-secret:${AFILIADOS_ADMIN_SECRET:}}") String afiliadosSecret) {
         this.service = service;
         this.adminSecret = adminSecret;
+        this.afiliadosSecret = afiliadosSecret;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout((int) Duration.ofSeconds(10).toMillis());
         factory.setReadTimeout((int) Duration.ofSeconds(15).toMillis());
@@ -61,6 +66,16 @@ public class RestaurantesController {
                 .requestFactory(factory)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
+        // Se AFILIADOS_API_BASE_URL não estiver setado, deixa o builder sem base
+        // — o endpoint de vinculação vai retornar 500 amigável em runtime.
+        String afiBase = afiliadosBaseUrl == null ? "" : afiliadosBaseUrl.trim();
+        this.afiliadosClient = afiBase.isEmpty()
+                ? RestClient.builder().requestFactory(factory).build()
+                : RestClient.builder()
+                    .baseUrl(afiBase)
+                    .requestFactory(factory)
+                    .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .build();
     }
 
     @GetMapping
@@ -133,6 +148,64 @@ public class RestaurantesController {
             log.error("[Precificar] erro: {}", e.getMessage());
             return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
         }
+    }
+
+    /**
+     * Vincula (ou desvincula) manualmente um restaurante a um afiliado.
+     *
+     * Fluxo:
+     *   Body { "codigo": "ABC12" } → busca no myafiliados-api pra pegar
+     *     nome, email e comissão, e grava snapshot no restaurante.
+     *   Body { "codigo": null } ou {} → REMOVE o vínculo (zera todos os
+     *     campos snap). Útil pra corrigir vínculo cadastrado errado.
+     *
+     * NÃO invoca myafiliados quando se está desvinculando — só quando
+     * está atribuindo um código novo.
+     */
+    @org.springframework.web.bind.annotation.PatchMapping("/{id}/afiliado")
+    public ResponseEntity<Map<String, Object>> vincularAfiliado(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body) {
+        Object codigoRaw = body == null ? null : body.get("codigo");
+        String codigo = codigoRaw == null ? null : codigoRaw.toString().trim();
+        boolean desvincular = codigo == null || codigo.isBlank() || "null".equalsIgnoreCase(codigo);
+
+        if (desvincular) {
+            return ResponseEntity.ok(service.vincularAfiliado(id, null));
+        }
+
+        // Buscar dados do afiliado no myafiliados-api pelo código
+        if (afiliadosSecret == null || afiliadosSecret.isBlank()) {
+            return ResponseEntity.status(500).body(Map.of(
+                    "erro", "AFILIADOS_ADMIN_SECRET não configurado — não dá pra validar o código"));
+        }
+        Map<String, Object> afiliado;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = afiliadosClient.get()
+                    .uri("/api/admin-internal/afiliado-por-codigo/{codigo}", codigo)
+                    .header("X-Admin-Secret", afiliadosSecret)
+                    .retrieve()
+                    .body(Map.class);
+            if (resp == null || resp.get("codigo") == null) {
+                return ResponseEntity.status(404).body(Map.of(
+                        "erro", "Afiliado não encontrado com esse código"));
+            }
+            afiliado = resp;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return ResponseEntity.status(404).body(Map.of(
+                        "erro", "Afiliado não encontrado com esse código"));
+            }
+            log.warn("[VincularAfiliado] myafiliados-api rejeitou: {}", e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode()).body(Map.of("erro", e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[VincularAfiliado] falha consultando myafiliados: {}", e.getMessage());
+            return ResponseEntity.status(502).body(Map.of(
+                    "erro", "Não foi possível contactar o sistema de afiliados. Tente novamente."));
+        }
+
+        return ResponseEntity.ok(service.vincularAfiliado(id, afiliado));
     }
 
     @DeleteMapping("/{id}")
