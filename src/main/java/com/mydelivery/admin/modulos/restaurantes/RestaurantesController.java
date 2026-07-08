@@ -54,7 +54,13 @@ public class RestaurantesController {
             @Value("${mydelivery.main-api.base-url:${MAIN_API_BASE_URL:https://api.mydeliveryfood.com.br}}") String mainBaseUrl,
             @Value("${mydelivery.admin.internal-secret:${ADMIN_INTERNAL_SECRET:}}") String adminSecret,
             @Value("${mydelivery.afiliados.api-base-url:${AFILIADOS_API_BASE_URL:}}") String afiliadosBaseUrl,
-            @Value("${mydelivery.afiliados.admin-secret:${AFILIADOS_ADMIN_SECRET:}}") String afiliadosSecret) {
+            // Aceita QUALQUER dos dois nomes (compat com deploys diversos):
+            //  - AFILIADOS_ADMIN_SECRET (nome sugerido)
+            //  - AFILIADOS_WEBHOOK_SECRET (nome herdado do myafiliados-api,
+            //    já que é o MESMO valor — o webhook secret também é o admin
+            //    secret na prática, pra simplificar config)
+            // Spring resolve o primeiro que estiver definido.
+            @Value("${mydelivery.afiliados.admin-secret:${AFILIADOS_ADMIN_SECRET:${AFILIADOS_WEBHOOK_SECRET:}}}") String afiliadosSecret) {
         this.service = service;
         this.adminSecret = adminSecret;
         this.afiliadosSecret = afiliadosSecret;
@@ -66,9 +72,13 @@ public class RestaurantesController {
                 .requestFactory(factory)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
-        // Se AFILIADOS_API_BASE_URL não estiver setado, deixa o builder sem base
-        // — o endpoint de vinculação vai retornar 500 amigável em runtime.
+        // Normaliza URL: se vier sem esquema (típico erro de config —
+        // "afiliados.mydeliveryfood.com.br"), prepend https:// automático.
+        // RestClient exige esquema explícito ou lança IllegalArgumentException.
         String afiBase = afiliadosBaseUrl == null ? "" : afiliadosBaseUrl.trim();
+        if (!afiBase.isEmpty() && !afiBase.startsWith("http://") && !afiBase.startsWith("https://")) {
+            afiBase = "https://" + afiBase;
+        }
         this.afiliadosClient = afiBase.isEmpty()
                 ? RestClient.builder().requestFactory(factory).build()
                 : RestClient.builder()
