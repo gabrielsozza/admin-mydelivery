@@ -76,6 +76,14 @@ public class RestaurantesController {
                     .requestFactory(factory)
                     .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .build();
+        // Log de boot pra facilitar diagnóstico do "AFILIADOS_ADMIN_SECRET
+        // não configurado" — mostra tamanho (não o valor) pra confirmar
+        // se a env var chegou no processo, sem vazar segredo nos logs.
+        log.info("[Restaurantes] boot: mainBaseUrl={}, adminSecret={}chars, afiliadosBaseUrl={}, afiliadosSecret={}chars",
+                mainBaseUrl,
+                adminSecret == null ? 0 : adminSecret.length(),
+                afiBase.isEmpty() ? "(vazio)" : afiBase,
+                afiliadosSecret == null ? 0 : afiliadosSecret.length());
     }
 
     @GetMapping
