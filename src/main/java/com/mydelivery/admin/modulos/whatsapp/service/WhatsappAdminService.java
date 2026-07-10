@@ -28,30 +28,33 @@ import com.mydelivery.admin.shared.main.repository.WhatsappInstanceMainRepositor
 import lombok.RequiredArgsConstructor;
 
 /**
- * Monitoramento das instâncias WhatsApp dos restaurantes (Evolution API).
+ * Monitoramento das instâncias WhatsApp dos restaurantes.
  *
- * Lê {@code whatsapp_instances} do main DB. Não escreve — operações de reconexão
- * ficariam pra fase futura (precisariam chamar a Evolution API direto, o que é
- * responsabilidade do main app).
+ * Lê {@code whatsapp_instances} do main DB. TODA ação de manutenção (restart,
+ * reset, health-check real) delega ao {@code main-api} via
+ * {@code /api/admin-internal/whatsapp/*} — o main é quem sabe falar Uazapi.
+ *
+ * <p>Antes desse refactor (jul/2026) esse serviço tinha um {@code
+ * EvolutionAdminClient} próprio que chamava Evolution API direto. Ficou
+ * inútil após a migração pra Uazapi (endpoints diferentes) e foi removido —
+ * o admin não fala mais com o servidor WhatsApp, só com o main-api. Um
+ * lugar só pra manter e nenhuma variável Uazapi no Railway do admin.
  */
 @Service
 public class WhatsappAdminService {
 
     private final WhatsappInstanceMainRepository repo;
     private final RestauranteMainRepository restauranteRepo;
-    private final EvolutionAdminClient evolution;
     private final RestClient mainClient;
     private final String adminSecret;
 
     public WhatsappAdminService(
             WhatsappInstanceMainRepository repo,
             RestauranteMainRepository restauranteRepo,
-            EvolutionAdminClient evolution,
             @Value("${mydelivery.main-api.base-url:${MAIN_API_BASE_URL:https://api.mydeliveryfood.com.br}}") String mainBaseUrl,
             @Value("${mydelivery.admin.internal-secret:${ADMIN_INTERNAL_SECRET:}}") String adminSecret) {
         this.repo = repo;
         this.restauranteRepo = restauranteRepo;
-        this.evolution = evolution;
         this.adminSecret = adminSecret;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout((int) java.time.Duration.ofSeconds(10).toMillis());
@@ -172,10 +175,14 @@ public class WhatsappAdminService {
             if (resp != null) out.putAll(resp);
             return out;
         } catch (RestClientResponseException e) {
-            // Fallback: chama Evolution direto (comportamento antigo)
-            evolution.restart(inst.getInstanceName());
-            return Map.of("ok", true, "instanceName", inst.getInstanceName(),
-                    "aviso", "main-api indisponível, usado fallback direto");
+            // main-api é a única rota — sem fallback direto (Uazapi é do main).
+            return Map.of("ok", false, "instanceName", inst.getInstanceName(),
+                    "erro", "main-api retornou " + e.getStatusCode(),
+                    "detalhe", e.getResponseBodyAsString());
+        } catch (Exception e) {
+            return Map.of("ok", false, "instanceName", inst.getInstanceName(),
+                    "erro", "falha ao contatar main-api",
+                    "detalhe", e.getMessage());
         }
     }
 
@@ -344,32 +351,50 @@ public class WhatsappAdminService {
     }
 
     /**
-     * Verifica o estado REAL na Evolution agora (não cache do DB). Útil pra detectar
-     * "bot dormindo" — Evolution mostra open mas banco mostra outra coisa, ou
-     * Evolution não responde de jeito nenhum.
+     * Verifica o estado REAL agora (não cache do DB). Útil pra detectar bot
+     * dormindo — main-api consulta Uazapi como fonte da verdade e devolve
+     * um snapshot rico.
      *
-     * Retorna:
-     *   { stateReal: "open"|"close"|"connecting"|"timeout", stateLocal: "...",
-     *     coerente: bool, instanceName: "..." }
+     * <p>Delegação: chama {@code /api/admin-internal/whatsapp/{name}/saude}
+     * no main-api. Esse endpoint já é alimentado pelo {@code UazapiBootSyncService}
+     * (que roda no boot e a cada 10 min) — não precisamos duplicar cliente Uazapi
+     * aqui.
+     *
+     * <p>Retorno normalizado: {@code stateReal} vira "open"/"close"/"timeout" pra
+     * compatibilidade com o front atual do admin.
      */
+    @SuppressWarnings("unchecked")
     @Transactional(transactionManager = "mainTransactionManager", readOnly = true)
     public Map<String, Object> healthCheck(Long instanceId) {
         WhatsappInstanceMain inst = repo.findById(instanceId)
                 .orElseThrow(() -> new NotFoundException("Instância " + instanceId + " não encontrada"));
-        Map<String, Object> evo = evolution.connectionState(inst.getInstanceName());
 
+        Map<String, Object> raw = null;
         String stateReal = "timeout";
-        if (evo != null) {
-            Object instData = evo.get("instance");
-            if (instData instanceof Map<?, ?> m) {
-                Object s = ((Map<String, Object>) m).get("state");
-                if (s != null) stateReal = s.toString();
-            } else if (evo.get("state") != null) {
-                stateReal = evo.get("state").toString();
-            } else if (evo.get("erro") != null) {
-                stateReal = "timeout";
+        try {
+            raw = mainClient.get()
+                    .uri("/api/admin-internal/whatsapp/{name}/saude", inst.getInstanceName())
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            if (raw != null) {
+                // main-api devolve status atual + phone + timestamps de heartbeat.
+                // Tenta múltiplas chaves pra ser tolerante a mudanças no shape.
+                Object status = raw.get("status");
+                if (status == null) status = raw.get("state");
+                if (status == null) status = raw.get("stateReal");
+                if (status != null) {
+                    String s = status.toString().toUpperCase();
+                    if ("CONECTADA".equals(s) || "OPEN".equals(s)) stateReal = "open";
+                    else if ("DESCONECTADA".equals(s) || "CLOSE".equals(s) || "CLOSED".equals(s)) stateReal = "close";
+                    else if ("AGUARDANDO_QR".equals(s) || "CONNECTING".equals(s)) stateReal = "connecting";
+                    else stateReal = status.toString().toLowerCase();
+                }
             }
+        } catch (Exception e) {
+            raw = Map.of("erro", e.getMessage());
         }
+
         String stateLocal = inst.getStatus() == null ? "?" : inst.getStatus().name();
         boolean coerente = ("open".equalsIgnoreCase(stateReal) && "CONECTADA".equals(stateLocal))
                 || ("close".equalsIgnoreCase(stateReal) && "DESCONECTADA".equals(stateLocal));
@@ -378,7 +403,7 @@ public class WhatsappAdminService {
                 "stateReal", stateReal,
                 "stateLocal", stateLocal,
                 "coerente", coerente,
-                "raw", evo
+                "raw", raw == null ? Map.of() : raw
         );
     }
 }
