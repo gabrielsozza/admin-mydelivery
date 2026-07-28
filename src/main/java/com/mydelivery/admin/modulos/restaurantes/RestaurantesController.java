@@ -304,6 +304,41 @@ public class RestaurantesController {
         }
     }
 
+    /**
+     * "Conceder dias grátis" — libera loja por N dias (esquecendo dívida pendente).
+     * Proxy pra /liberar-por-dias na main-api (fix definitivo do incidente Monkeys #9).
+     */
+    @PostMapping("/{id}/conceder-dias")
+    public ResponseEntity<?> concederDias(
+            @PathVariable Long id,
+            @RequestParam(value = "dias", required = false, defaultValue = "30") Integer dias) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado"));
+        }
+        int d = (dias == null || dias < 1) ? 30 : Math.min(dias, 730);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/admin-internal/restaurantes/{id}/liberar-por-dias?dias={d}", id, d)
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            log.info("[ConcederDias] restaurante={} dias={} → OK", id, d);
+            return ResponseEntity.ok(resp);
+        } catch (RestClientResponseException e) {
+            log.warn("[ConcederDias] main rejeitou (id={}): {}", id, e.getResponseBodyAsString());
+            int st = e.getStatusCode().value();
+            int safe = (st == 401 || st == 403) ? 502 : st;
+            return ResponseEntity.status(safe).body(Map.of(
+                    "erro", "Backend rejeitou: " + e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[ConcederDias] erro id={}: {}", id, e.getMessage());
+            return ResponseEntity.status(500).body(Map.of(
+                    "erro", e.getMessage() != null ? e.getMessage() : "Falha ao contatar main-api"));
+        }
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> apagar(@PathVariable Long id) {
         Map<String, Integer> detalhe = service.apagarDefinitivamente(id);
