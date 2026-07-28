@@ -253,11 +253,16 @@ public class RestaurantesController {
                     "mensagem", "Loja desbloqueada por " + d + " dia(s)"));
         } catch (RestClientResponseException e) {
             log.warn("[Desbloquear] main API rejeitou (id={}): {}", id, e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode())
-                    .body(Map.of("erro", e.getResponseBodyAsString()));
+            // NUNCA propagar 401/403 do upstream — o admin logou OK, o problema
+            // é X-Admin-Secret entre APIs. Propagar 403 faz AdminAPI.js deslogar.
+            int st = e.getStatusCode().value();
+            int safe = (st == 401 || st == 403) ? 502 : st;
+            return ResponseEntity.status(safe).body(Map.of(
+                    "erro", "Backend rejeitou: " + e.getResponseBodyAsString()));
         } catch (Exception e) {
             log.error("[Desbloquear] erro id={}: {}", id, e.getMessage());
-            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of(
+                    "erro", e.getMessage() != null ? e.getMessage() : "Falha ao contatar main-api"));
         }
     }
 
@@ -288,11 +293,14 @@ public class RestaurantesController {
             return ResponseEntity.ok(resp != null ? resp : Map.of("ok", true, "mensagem", "Loja bloqueada"));
         } catch (RestClientResponseException e) {
             log.warn("[Bloquear] main API rejeitou (id={}): {}", id, e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode())
-                    .body(Map.of("erro", e.getResponseBodyAsString()));
+            int st = e.getStatusCode().value();
+            int safe = (st == 401 || st == 403) ? 502 : st;
+            return ResponseEntity.status(safe).body(Map.of(
+                    "erro", "Backend rejeitou: " + e.getResponseBodyAsString()));
         } catch (Exception e) {
             log.error("[Bloquear] erro id={}: {}", id, e.getMessage());
-            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of(
+                    "erro", e.getMessage() != null ? e.getMessage() : "Falha ao contatar main-api"));
         }
     }
 
