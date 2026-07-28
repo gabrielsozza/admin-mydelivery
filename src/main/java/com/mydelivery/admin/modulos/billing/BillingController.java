@@ -192,6 +192,52 @@ public class BillingController {
     }
 
     /**
+     * Reconcilia manualmente um PIX/cartão de assinatura pago no MP que não
+     * liberou a loja automaticamente (webhook do MP não chegou).
+     *
+     * O admin cola o {@code mpPaymentId} vindo do painel do Mercado Pago —
+     * o main API consulta o MP, valida approved + external_reference=assinatura-*,
+     * ativa o plano e cria a linha em {@code pagamentos_mensalidade} com a
+     * DATA REAL do pagamento (não a data em que o admin rodou).
+     *
+     * Idempotente: rodar 2x pro mesmo mpPaymentId não duplica receita nem
+     * estende vigência do plano.
+     *
+     * Body: { mpPaymentId }
+     */
+    @PostMapping("/reconciliar-pagamento")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> reconciliarPagamento(@RequestBody Map<String, Object> body,
+                                                   @AuthenticationPrincipal String adminEmail) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado no Railway"));
+        }
+        Object raw = body == null ? null : body.get("mpPaymentId");
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("erro", "Informe mpPaymentId"));
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/restaurante/assinatura/reconciliar-pagamento-admin")
+                    .header("X-Admin-Secret", adminSecret)
+                    .body(Map.of("mpPaymentId", String.valueOf(raw).trim()))
+                    .retrieve()
+                    .body(Map.class);
+            log.warn("[ReconciliacaoPix] admin={} mpPaymentId={} → resp={}", adminEmail, raw, resp);
+            return ResponseEntity.ok(resp);
+        } catch (RestClientResponseException e) {
+            log.warn("[ReconciliacaoPix] main API rejeitou: {}", e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[ReconciliacaoPix] erro: {}", e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+        }
+    }
+
+    /**
      * Replica o cardápio da origem pra UMA OU MAIS lojas destino.
      * Faz 1 chamada HTTP por destino (cada destino é uma transação isolada no main —
      * se 1 falhar, os outros não são afetados).

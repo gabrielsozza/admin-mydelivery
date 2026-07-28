@@ -30,6 +30,7 @@ public class RestaurantesService {
     private final UsuarioMainRepository usuarioRepo;
     private final MainDbWriter writer;
     private final PasswordEncoder passwordEncoder;
+    private final AfiliadosSyncService afiliadosSync;
 
     private static final String SENHA_ALFABETO =
         "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -182,6 +183,9 @@ public class RestaurantesService {
             r.setAfiliadoVinculadoEm(null);
             restauranteRepo.save(r);
             log.warn("[Afiliado] restaurante {} DESVINCULADO (era {})", restauranteId, antigoCodigo);
+            // Notifica painel do afiliado (async, fail-safe). Sem isso o painel
+            // do afiliado continuaria contando o restaurante como indicado.
+            afiliadosSync.desvinculoManual(r, antigoCodigo, emailDoDono(r));
             return Map.of(
                 "ok", true,
                 "restauranteId", restauranteId,
@@ -208,6 +212,14 @@ public class RestaurantesService {
         restauranteRepo.save(r);
         log.warn("[Afiliado] restaurante {} vinculado a codigo={} nome={} (antes: {})",
                 restauranteId, codigo, r.getAfiliadoNomeSnap(), antigoCodigo);
+        // Se estava vinculado a um afiliado diferente, notifica o antigo do
+        // desvínculo antes de notificar o novo. Sem isso o afiliado antigo
+        // continuaria contando esse restaurante como dele.
+        String codigoAtual = codigo.trim();
+        if (antigoCodigo != null && !antigoCodigo.isBlank() && !antigoCodigo.equalsIgnoreCase(codigoAtual)) {
+            afiliadosSync.desvinculoManual(r, antigoCodigo, emailDoDono(r));
+        }
+        afiliadosSync.vinculoManual(r, codigoAtual, emailDoDono(r));
         return Map.of(
             "ok", true,
             "restauranteId", restauranteId,
@@ -216,6 +228,18 @@ public class RestaurantesService {
             "codigoNovo", codigo,
             "nome", r.getAfiliadoNomeSnap() == null ? "" : r.getAfiliadoNomeSnap()
         );
+    }
+
+    /** Busca email do dono do restaurante (Usuario 1:1 via usuarioId). Retorna null se não encontrar. */
+    private String emailDoDono(RestauranteMain r) {
+        if (r == null || r.getUsuarioId() == null) return null;
+        try {
+            return usuarioRepo.findById(r.getUsuarioId())
+                    .map(UsuarioMain::getEmail)
+                    .orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Long parseLong(Object o) {

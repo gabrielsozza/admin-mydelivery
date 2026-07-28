@@ -226,6 +226,76 @@ public class RestaurantesController {
         return ResponseEntity.ok(service.vincularAfiliado(id, afiliado));
     }
 
+    /**
+     * Desbloqueia o restaurante e concede {@code dias} de acesso (default 30).
+     * Proxy pra {@code POST /api/admin-internal/restaurantes/{id}/desbloquear?dias=N}
+     * na mydelivery-api, usando X-Admin-Secret.
+     */
+    @PostMapping("/{id}/desbloquear")
+    public ResponseEntity<?> desbloquear(
+            @PathVariable Long id,
+            @RequestParam(value = "dias", required = false, defaultValue = "30") Integer dias) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado"));
+        }
+        int d = (dias == null || dias < 1) ? 30 : Math.min(dias, 365);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/admin-internal/restaurantes/{id}/desbloquear?dias={d}", id, d)
+                    .header("X-Admin-Secret", adminSecret)
+                    .retrieve()
+                    .body(Map.class);
+            log.info("[Desbloquear] restaurante={} dias={} → OK", id, d);
+            return ResponseEntity.ok(resp != null ? resp : Map.of(
+                    "ok", true,
+                    "mensagem", "Loja desbloqueada por " + d + " dia(s)"));
+        } catch (RestClientResponseException e) {
+            log.warn("[Desbloquear] main API rejeitou (id={}): {}", id, e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[Desbloquear] erro id={}: {}", id, e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+        }
+    }
+
+    /**
+     * Bloqueia manualmente o restaurante (força overlay de assinatura na loja).
+     * Proxy pra {@code POST /api/admin-internal/restaurantes/{id}/bloquear} na mydelivery-api.
+     */
+    @PostMapping("/{id}/bloquear")
+    public ResponseEntity<?> bloquear(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body) {
+        if (adminSecret == null || adminSecret.isBlank()) {
+            return ResponseEntity.status(500)
+                    .body(Map.of("erro", "ADMIN_INTERNAL_SECRET não configurado"));
+        }
+        String motivo = body != null && body.get("motivo") != null
+                ? String.valueOf(body.get("motivo"))
+                : "Bloqueio manual pelo admin";
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = mainClient.post()
+                    .uri("/api/admin-internal/restaurantes/{id}/bloquear", id)
+                    .header("X-Admin-Secret", adminSecret)
+                    .body(Map.of("motivo", motivo))
+                    .retrieve()
+                    .body(Map.class);
+            log.info("[Bloquear] restaurante={} motivo={} → OK", id, motivo);
+            return ResponseEntity.ok(resp != null ? resp : Map.of("ok", true, "mensagem", "Loja bloqueada"));
+        } catch (RestClientResponseException e) {
+            log.warn("[Bloquear] main API rejeitou (id={}): {}", id, e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("erro", e.getResponseBodyAsString()));
+        } catch (Exception e) {
+            log.error("[Bloquear] erro id={}: {}", id, e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("erro", e.getMessage()));
+        }
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> apagar(@PathVariable Long id) {
         Map<String, Integer> detalhe = service.apagarDefinitivamente(id);
