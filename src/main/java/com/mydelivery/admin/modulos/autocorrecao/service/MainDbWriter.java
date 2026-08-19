@@ -528,6 +528,7 @@ public class MainDbWriter {
      * @return Map com contadores de linhas removidas por área pra logging/auditoria
      */
     @Transactional(transactionManager = "mainTransactionManager")
+    @Transactional("mainTransactionManager")
     public java.util.Map<String, Integer> apagarRestauranteCompletamente(Long restauranteId) {
         if (restauranteId == null) throw new IllegalArgumentException("restauranteId null");
 
@@ -542,6 +543,12 @@ public class MainDbWriter {
         }
 
         java.util.Map<String, Integer> stats = new java.util.LinkedHashMap<>();
+
+        // FK checks OFF durante o expurgo: garante que o DELETE nunca mais trava
+        // por uma tabela filha nova sem ON DELETE CASCADE. Reativado no finally,
+        // na MESMA conexão da transação (por isso o @Transactional acima).
+        jdbc.execute("SET FOREIGN_KEY_CHECKS=0");
+        try {
 
         // ─── 1. PEDIDOS (cascata profunda) ──────────────────────────────
         stats.put("pedido_item_complementos", jdbc.update("""
@@ -742,6 +749,27 @@ public class MainDbWriter {
         stats.put("restaurante_slots", jdbc.update(
             "DELETE FROM restaurante_slots WHERE restaurante_id = ?", restauranteId));
 
+        // ─── 12.5 SWEEP DINÂMICO — qualquer tabela com restaurante_id ───
+        // Features novas (equipe, caixa, combos, iFood, grupos-modelo, push...)
+        // criam tabelas com coluna restaurante_id. Em vez de editar este método
+        // a cada feature, varremos o catálogo do MySQL e limpamos todas. Os
+        // nomes vêm do information_schema (NÃO do usuário) + whitelist regex —
+        // sem risco de injeção. Só toca no que ainda não foi tratado acima.
+        java.util.List<String> tabelasRestauranteId = jdbc.queryForList(
+            "SELECT table_name FROM information_schema.columns " +
+            "WHERE table_schema = DATABASE() AND column_name = 'restaurante_id' " +
+            "AND table_name <> 'restaurantes'", String.class);
+        for (String tab : tabelasRestauranteId) {
+            if (tab == null || !tab.matches("[A-Za-z0-9_]+")) continue;
+            if (stats.containsKey(tab)) continue; // já limpa explicitamente acima
+            try {
+                int n = jdbc.update("DELETE FROM `" + tab + "` WHERE restaurante_id = ?", restauranteId);
+                if (n > 0) stats.put(tab + " (auto)", n);
+            } catch (RuntimeException e) {
+                log.warn("[MainDbWriter] sweep: falha limpando {} (ok, FK off): {}", tab, e.getMessage());
+            }
+        }
+
         // ─── 13. O RESTAURANTE EM SI ────────────────────────────────────
         stats.put("restaurantes", jdbc.update(
             "DELETE FROM restaurantes WHERE id = ?", restauranteId));
@@ -752,6 +780,11 @@ public class MainDbWriter {
                 "DELETE FROM password_reset_tokens WHERE usuario_id = ?", usuarioId));
             stats.put("usuarios", jdbc.update(
                 "DELETE FROM usuarios WHERE id = ?", usuarioId));
+        }
+        } finally {
+            // Reativa SEMPRE — mesmo se algo acima estourar — pra não devolver
+            // a conexão ao pool com as checagens de FK desligadas.
+            jdbc.execute("SET FOREIGN_KEY_CHECKS=1");
         }
 
         int total = stats.values().stream().mapToInt(Integer::intValue).sum();
